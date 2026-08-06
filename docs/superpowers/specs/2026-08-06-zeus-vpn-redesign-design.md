@@ -34,7 +34,8 @@
 - `bot/webhooks/yookassa.py`: `POST /webhook/yookassa`, парсит `event`, при `payment.succeeded` — подтверждает статус через API и зачисляет сумму на `User.balance`.
 - Если `YOOKASSA_SHOP_ID`/`YOOKASSA_SECRET_KEY` пустые — хендлер пополнения баланса показывает «⚡ Пополнение баланса скоро откроется» вместо вызова API.
 - Удаляются: `bot/services/{cryptobot,lava,freekassa}.py`, `bot/webhooks/{cryptobot,lava,freekassa}.py`, соответствующие тесты.
-- `.env`: убрать `CRYPTOBOT_TOKEN`, `LAVA_API_KEY`, `LAVA_SHOP_ID`, `FREEKASSA_*`; добавить `YOOKASSA_SHOP_ID=""`, `YOOKASSA_SECRET_KEY=""`.
+- `.env`: убрать `CRYPTOBOT_TOKEN`, `LAVA_API_KEY`, `LAVA_SHOP_ID`, `FREEKASSA_*`; добавить `YOOKASSA_SHOP_ID=""`, `YOOKASSA_SECRET_KEY=""`, `MIN_TOPUP_RUB=100.0`.
+- Минимальная сумма пополнения — **100₽** (`settings.MIN_TOPUP_RUB`). Проверяется в хендлере до вызова `create_payment()`: сумма меньше минимума — платёж не создаётся, пользователю показывается «⚡ Минимальная сумма пополнения — 100 ₽».
 - `PaymentProvider` enum → только `yookassa`.
 - `Payment` теряет обязательный `plan_id`/`devices_count` (это были параметры покупки тарифа) — теперь представляет пополнение баланса: `amount`, `status`, `external_id` (id платежа в ЮKassa).
 

@@ -8,17 +8,12 @@ class Settings(BaseSettings):
     REMNAWAVE_URL: str
     REMNAWAVE_API_TOKEN: str
     SUBSCRIPTION_HOST: str = ""
-    CRYPTOBOT_TOKEN: str
-    LAVA_API_KEY: str = ""
-    LAVA_SHOP_ID: str = ""
-    FREEKASSA_SHOP_ID: str = ""
-    FREEKASSA_SECRET1: str = ""
-    FREEKASSA_SECRET2: str = ""
+    YOOKASSA_SHOP_ID: str = ""
+    YOOKASSA_SECRET_KEY: str = ""
+    MIN_TOPUP_RUB: float = 100.0
     WEBHOOK_BASE_URL: str
     WEBHOOK_SECRET: str
     BOT_USERNAME: str
-    REFERRAL_PERCENT: float = 0.30
-    MIN_WITHDRAWAL_RUB: float = 100.0
     PRIVACY_URL: str = ""
     USER_AGREEMENT_URL: str = ""
 

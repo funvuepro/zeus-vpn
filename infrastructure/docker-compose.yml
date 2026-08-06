@@ -1,0 +1,66 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vpnbot
+      POSTGRES_USER: vpnbot
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vpnbot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vpnbot:${DB_PASSWORD}@postgres:5432/vpnbot
+      BOT_TOKEN: ${BOT_TOKEN}
+      MARZBAN_URL: ${MARZBAN_URL}
+      MARZBAN_USERNAME: ${MARZBAN_USERNAME}
+      MARZBAN_PASSWORD: ${MARZBAN_PASSWORD}
+      CRYPTOBOT_TOKEN: ${CRYPTOBOT_TOKEN}
+      LAVA_API_KEY: ${LAVA_API_KEY}
+      LAVA_SHOP_ID: ${LAVA_SHOP_ID}
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      BOT_USERNAME: ${BOT_USERNAME}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    command: python -m bot.main
+
+  webhook:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://vpnbot:${DB_PASSWORD}@postgres:5432/vpnbot
+      BOT_TOKEN: ${BOT_TOKEN}
+      CRYPTOBOT_TOKEN: ${CRYPTOBOT_TOKEN}
+      LAVA_API_KEY: ${LAVA_API_KEY}
+      LAVA_SHOP_ID: ${LAVA_SHOP_ID}
+      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      BOT_USERNAME: ${BOT_USERNAME}
+      MARZBAN_URL: ${MARZBAN_URL}
+      MARZBAN_USERNAME: ${MARZBAN_USERNAME}
+      MARZBAN_PASSWORD: ${MARZBAN_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8001:8001"
+    restart: unless-stopped
+    command: uvicorn bot.webhooks.app:app --host 0.0.0.0 --port 8001
+
+volumes:
+  postgres_data:

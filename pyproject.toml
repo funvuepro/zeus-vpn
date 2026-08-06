@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "vpn-bot"
+version = "0.1.0"
+description = "VPN Telegram Bot Service"
+authors = ["Denis Babakov <denis.babakov.666@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.15"
+aiogram = ">=3.28"
+fastapi = "^0.115"
+uvicorn = {extras = ["standard"], version = "^0.32"}
+sqlalchemy = {extras = ["asyncio"], version = "^2.0"}
+asyncpg = "^0.30"
+alembic = "^1.14"
+pydantic-settings = "^2.6"
+apscheduler = "^3.10"
+httpx = "^0.28"
+aiosqlite = "^0.20"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3"
+pytest-asyncio = "^0.24"
+pytest-mock = "^3.14"
+greenlet = "^3.5.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

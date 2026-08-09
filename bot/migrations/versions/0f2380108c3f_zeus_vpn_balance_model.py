@@ -48,6 +48,46 @@ def upgrade() -> None:
     )
     op.execute("INSERT INTO app_settings (id, daily_rate_per_device) VALUES (1, 1.00)")
 
+    # --- instructions / vpn_servers: net-new tables, present on the ORM models since the Task 1
+    # bootstrap commit but never created by any migration in this chain. Without these, a Postgres
+    # database built purely via `alembic upgrade head` would be missing both tables entirely, even
+    # though this migration is meant to be the real source of truth for Postgres. Neither table has
+    # a ForeignKey to another table or to `users`, so creation order relative to the rest of this
+    # migration is not constrained.
+    op.create_table(
+        "instructions",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column(
+            "platform",
+            sa.Enum("android", "ios", "windows", "macos", name="instructionplatform"),
+            nullable=False,
+        ),
+        sa.Column(
+            "category",
+            sa.Enum("general", "connect", name="instructioncategory"),
+            nullable=False,
+        ),
+        sa.Column("text", sa.String(), nullable=False),
+        sa.UniqueConstraint("platform", "category", name="uq_instruction_platform_category"),
+    )
+
+    op.create_table(
+        "vpn_servers",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("name", sa.String(), nullable=False),
+        sa.Column("ip", sa.String(), nullable=False),
+        sa.Column("port", sa.Integer(), nullable=False),
+        sa.Column("transport", sa.String(), nullable=False),
+        sa.Column("public_key", sa.String(), nullable=False),
+        sa.Column("short_id", sa.String(), nullable=False),
+        sa.Column("server_name", sa.String(), nullable=False),
+        sa.Column("fingerprint", sa.String(), nullable=False),
+        sa.Column("service_name", sa.String(), nullable=True),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
+        sa.Column("is_backup", sa.Boolean(), nullable=False, server_default="false"),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    )
+
     # payments.plan_id, payments.subscription_id (init) and payments.promo_code_id (promo_codes
     # migration) are guaranteed to exist in this chain. payments.devices_count and
     # payments.is_upgrade were only ever present on the ORM model (never created by a migration

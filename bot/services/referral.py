@@ -3,18 +3,13 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.config import settings
-from bot.database.models import (
-    Payment,
-    PaymentStatus,
-    ReferralStatus,
-    ReferralTransaction,
-    User,
-    Withdrawal,
-    WithdrawalProvider,
-    WithdrawalStatus,
-    CryptoType,
-)
+from bot.database.models import Payment, PaymentStatus, User
+
+REFERRAL_BONUS_RUB = Decimal("100.00")
+
+
+async def notify_user(telegram_id: int, text: str):
+    pass  # reassigned at startup in main.py
 
 
 async def get_referral_registered_count(user_id: int, session: AsyncSession) -> int:
@@ -35,54 +30,24 @@ async def get_referral_paid_count(user_id: int, session: AsyncSession) -> int:
     return result.scalar_one_or_none() or 0
 
 
-async def get_referral_balance(user_id: int, session: AsyncSession) -> Decimal:
-    result = await session.execute(
-        select(func.sum(ReferralTransaction.amount)).where(
-            ReferralTransaction.referrer_id == user_id,
-            ReferralTransaction.status == ReferralStatus.pending,
+async def grant_referral_bonus(user: User, session: AsyncSession) -> None:
+    if not user.referred_by or user.referral_bonus_granted:
+        return
+
+    paid_count = await session.scalar(
+        select(func.count(Payment.id)).where(
+            Payment.user_id == user.id,
+            Payment.status == PaymentStatus.paid,
         )
     )
-    return result.scalar_one_or_none() or Decimal("0.00")
+    if (paid_count or 0) != 1:
+        return  # not the user's first paid payment
 
+    referrer = await session.get(User, user.referred_by)
+    if referrer is None:
+        return
 
-async def request_withdrawal(
-    user_id: int,
-    amount: Decimal,
-    provider: WithdrawalProvider,
-    wallet_address: str,
-    session: AsyncSession,
-    crypto_type: CryptoType | None = None,
-) -> Withdrawal:
-    if amount < Decimal(str(settings.MIN_WITHDRAWAL_RUB)):
-        raise ValueError(f"Минимальная сумма вывода: {int(settings.MIN_WITHDRAWAL_RUB)} ₽")
-
-    balance = await get_referral_balance(user_id, session)
-    if amount > balance:
-        raise ValueError(f"Недостаточно средств. Доступно: {balance} ₽")
-
-    result = await session.execute(
-        select(ReferralTransaction).where(
-            ReferralTransaction.referrer_id == user_id,
-            ReferralTransaction.status == ReferralStatus.pending,
-        )
-    )
-    txs = result.scalars().all()
-
-    spent = Decimal("0.00")
-    for tx in txs:
-        if spent >= amount:
-            break
-        tx.status = ReferralStatus.withdrawn
-        spent += tx.amount
-
-    withdrawal = Withdrawal(
-        user_id=user_id,
-        amount=amount,
-        provider=provider,
-        wallet_address=wallet_address,
-        crypto_type=crypto_type,
-        status=WithdrawalStatus.pending,
-    )
-    session.add(withdrawal)
+    referrer.balance += REFERRAL_BONUS_RUB
+    user.referral_bonus_granted = True
     await session.commit()
-    return withdrawal
+    await notify_user(referrer.telegram_id, f"⚡ +{REFERRAL_BONUS_RUB} ₽ на баланс за приглашённого друга!")

@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import AppSettings, Payment, PaymentStatus, User
 from bot.services.remnawave import remnawave
+from bot.services.referral import grant_referral_bonus
 
 DEFAULT_DAILY_RATE = Decimal("1.00")
 
@@ -55,3 +56,4 @@ async def credit_topup(payment_id: int, amount: Decimal, external_id: str, sessi
 
     await session.commit()
     await notify_user(user.telegram_id, f"⚡ Баланс пополнен на {amount} ₽. Текущий баланс: {user.balance} ₽")
+    await grant_referral_bonus(user, session)

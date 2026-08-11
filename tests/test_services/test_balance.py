@@ -84,3 +84,24 @@ async def test_credit_topup_reactivates_disabled_access(db_session):
     await db_session.refresh(user)
     assert user.access_active is True
     assert user.grace_started_at is None
+
+
+async def test_credit_topup_grants_referral_bonus_on_first_payment(db_session):
+    from bot.services.balance import credit_topup
+
+    referrer = User(telegram_id=510, username="ref", balance=Decimal("0.00"))
+    db_session.add(referrer)
+    await db_session.commit()
+
+    invited = User(telegram_id=511, username="invited", referred_by=referrer.id, balance=Decimal("0.00"))
+    db_session.add(invited)
+    await db_session.commit()
+
+    payment = Payment(user_id=invited.id, provider=PaymentProvider.yookassa, amount=Decimal("150.00"))
+    db_session.add(payment)
+    await db_session.commit()
+
+    await credit_topup(payment.id, Decimal("150.00"), "yk_ext_ref", db_session)
+
+    await db_session.refresh(referrer)
+    assert referrer.balance == Decimal("100.00")

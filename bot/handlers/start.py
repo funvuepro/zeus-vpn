@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 
 from aiogram import Router
 from aiogram.filters import CommandStart
@@ -7,7 +8,7 @@ from aiogram.types import Message, FSInputFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Subscription, SubscriptionStatus, User
+from bot.database.models import User
 from bot.keyboards.inline import main_menu_keyboard, terms_accept_keyboard
 from bot.utils import get_section_photo
 
@@ -33,27 +34,23 @@ def _days_word(n: int) -> str:
     return "дней"
 
 
-def build_menu_text(user: User, sub: Subscription | None) -> str:
-    if sub:
-        expires_msk = sub.expires_at.replace(tzinfo=timezone.utc).astimezone(MSK)
-        day = expires_msk.day
-        month = _RU_MONTHS[expires_msk.month - 1]
-        time_str = expires_msk.strftime("%H:%M")
-        now = datetime.now(timezone.utc)
-        days_left = max(0, (sub.expires_at.replace(tzinfo=timezone.utc) - now).days)
-        sub_lines = (
-            f"✅ Подписка: <b>Активна</b>\n"
-            f"📆 Истекает: {day} {month} в {time_str}\n"
-            f"       <i>через {days_left} {_days_word(days_left)}</i>\n"
-            f"📱 Устройств: {sub.devices_limit}"
+def build_menu_text(user: User) -> str:
+    if user.access_active:
+        status_lines = (
+            f"✅ Доступ: <b>Активен</b>\n"
+            f"💰 Баланс: <b>{user.balance} ₽</b>\n"
+            f"📱 Устройств: {user.devices_limit}"
         )
     else:
-        sub_lines = "❌ Подписка: <b>Не активна</b>"
+        status_lines = (
+            f"❌ Доступ: <b>Отключён</b> (баланс исчерпан)\n"
+            f"💰 Баланс: <b>{user.balance} ₽</b>"
+        )
 
     return (
-        f"⚡️ <b>ПОДПИСКА DS-VPN</b>\n\n"
+        f"⚡️ <b>Zeus VPN</b>\n\n"
         f"🆔 ID: <code>{user.telegram_id}</code>\n\n"
-        f"{sub_lines}\n\n"
+        f"{status_lines}\n\n"
         f"Выберите раздел:"
     )
 
@@ -83,14 +80,15 @@ async def start_handler(message: Message, session: AsyncSession, command):
             telegram_id=telegram_id,
             username=username,
             referred_by=referred_by_id,
+            balance=Decimal("1.00"),
+            devices_limit=1,
         )
         session.add(user)
         await session.commit()
     elif referred_by_id and referred_by_id != user.referred_by:
-        # Already registered user tried to use a referral link
         await message.answer(
             "❌ <b>Бонус не получен</b>\n\n"
-            "Вы уже зарегистрированы в DS-VPN.\n"
+            "Вы уже зарегистрированы в Zeus VPN.\n"
             "Реферальный бонус начисляется только при первой регистрации.",
             parse_mode="HTML",
         )
@@ -104,16 +102,8 @@ async def start_handler(message: Message, session: AsyncSession, command):
         )
         return
 
-    result = await session.execute(
-        select(Subscription).where(
-            Subscription.user_id == user.id,
-            Subscription.status == SubscriptionStatus.active,
-        ).order_by(Subscription.expires_at.desc())
-    )
-    sub = result.scalar_one_or_none()
-
-    text = build_menu_text(user, sub)
-    keyboard = main_menu_keyboard(has_sub=bool(sub))
+    text = build_menu_text(user)
+    keyboard = main_menu_keyboard(has_access=user.access_active)
 
     # One message: photo + caption + keyboard
     global _logo_file_id

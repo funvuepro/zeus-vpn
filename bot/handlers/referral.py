@@ -4,8 +4,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User
-from bot.keyboards.inline import referral_keyboard, back_to_menu_keyboard
-from bot.services.referral import get_referral_registered_count, get_referral_paid_count
+from bot.keyboards.inline import referral_keyboard
+from bot.services.referral import get_referral_registered_count, get_referral_paid_count, REFERRAL_BONUS_RUB
 from bot.utils import smart_edit
 
 router = Router()
@@ -21,23 +21,19 @@ async def referrals_menu(callback: CallbackQuery, session: AsyncSession):
     me = await callback.bot.get_me()
     ref_link = f"https://t.me/{me.username}?start=ref{callback.from_user.id}"
 
-    earned_days = paid * 5
     await smart_edit(
         callback,
-        f"🎁 <b>РЕФЕРАЛЬНАЯ ПРОГРАММА DS-VPN</b>\n\n"
-        f"Приглашайте друзей и получайте бонусные дни подписки!\n\n"
+        f"🎁 <b>РЕФЕРАЛЬНАЯ ПРОГРАММА ZEUS VPN</b>\n\n"
+        f"Приглашайте друзей и получайте бонус на баланс!\n\n"
         f"🔗 <b>ВАША ССЫЛКА:</b>\n"
         f"<code>{ref_link}</code>\n\n"
         f"📊 <b>СТАТИСТИКА:</b>\n"
-        f"┣ 👥 Переходов: <b>0</b>\n"
         f"┣ ✅ Регистраций: <b>{registered}</b>\n"
-        f"┣ 💳 Оплатили: <b>{paid}</b>\n"
-        f"┗ 🎁 Заработано дней: <b>{earned_days} дн.</b>\n\n"
+        f"┗ 💳 Оплатили: <b>{paid}</b>\n\n"
         f"💡 <b>КАК ЭТО РАБОТАЕТ:</b>\n"
         f"1️⃣ Отправьте вашу ссылку другу\n"
-        f"2️⃣ Друг регистрируется и покупает подписку\n"
-        f"3️⃣ Вам начисляется <b>+5 бонусных дней</b>\n"
-        f"4️⃣ Другу начисляется <b>+10 бонусных дней</b>\n\n"
-        f"<i>За пробный период дни не начисляются</i>",
+        f"2️⃣ Друг регистрируется и пополняет баланс\n"
+        f"3️⃣ Вам начисляется <b>+{REFERRAL_BONUS_RUB:.0f} ₽</b> на баланс\n\n"
+        f"<i>Бонус начисляется один раз, за первое пополнение друга</i>",
         referral_keyboard(ref_link),
     )

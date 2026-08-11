@@ -3,7 +3,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardBut
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Subscription, SubscriptionStatus, User
+from bot.database.models import User
 from bot.services.remnawave import remnawave
 from bot.utils import smart_edit
 
@@ -46,7 +46,7 @@ async def _ensure_remnawave_uuid(user: User, session: AsyncSession) -> str | Non
 
 def _no_sub_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💎 Купить подписку", callback_data="buy_subscription")],
+        [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="topup")],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
     ])
 
@@ -93,19 +93,12 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
         await smart_edit(callback, "❌ Пользователь не найден.", _no_sub_keyboard())
         return
 
-    # Check active subscription in local DB
-    sub = await session.scalar(
-        select(Subscription).where(
-            Subscription.user_id == user.id,
-            Subscription.status == SubscriptionStatus.active,
-        )
-    )
-    if not sub:
+    if not user.access_active:
         await smart_edit(
             callback,
             "📱 <b>МОИ УСТРОЙСТВА</b>\n\n"
-            "❌ У вас нет активной подписки.\n"
-            "Купите подписку, чтобы получить доступ к VPN.",
+            "❌ Доступ отключён — баланс исчерпан.\n"
+            "Пополните баланс, чтобы получить доступ к VPN.",
             _no_sub_keyboard(),
         )
         return
@@ -134,7 +127,7 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
         devices = []
 
     count = len(devices)
-    limit = sub.devices_limit
+    limit = user.devices_limit
 
     if not devices:
         # No devices yet — show subscription link to get started

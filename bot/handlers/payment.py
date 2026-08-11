@@ -1,186 +1,106 @@
-from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 
-from aiogram import Router, F
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Payment, PaymentProvider, Plan, Subscription, SubscriptionStatus, User
+from bot.config import get_settings
+from bot.database.models import Payment, PaymentProvider, User
 from bot.keyboards.inline import (
-    get_price,
-    order_confirm_keyboard,
+    back_to_menu_keyboard,
+    devices_count_keyboard,
+    main_menu_keyboard,
     payment_formed_keyboard,
-    S,
+    topup_amount_prompt_keyboard,
 )
-from bot.services.freekassa import create_payment_url as fk_payment_url
+from bot.services.yookassa import create_payment
 from bot.utils import smart_edit
 
 router = Router()
 
+MIN_TOPUP_MESSAGE = "⚡ Минимальная сумма пополнения — {min_amount:.0f} ₽"
+PROVIDER_UNAVAILABLE_MESSAGE = "⚡ Пополнение баланса скоро откроется"
 
-@router.callback_query(F.data.startswith("order:"))
-async def order_confirm(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+
+class PaymentStates(StatesGroup):
+    waiting_for_amount = State()
+
+
+def _validate_topup_amount(amount: float, min_amount: float) -> tuple[bool, str | None]:
+    if amount < min_amount:
+        return False, MIN_TOPUP_MESSAGE.format(min_amount=min_amount)
+    return True, None
+
+
+@router.callback_query(F.data == "topup")
+async def topup_start(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    parts = callback.data.split(":")
-    plan_id = int(parts[1])
-    devices = int(parts[2])
-    plan = await session.get(Plan, plan_id)
-
-    data = await state.get_data()
-    discount = data.get("discount", 0)
-    promo_str = data.get("promo_str", "")
-    promo_applied = discount > 0
-
-    total_raw = get_price(plan.duration_days, devices)
-    final = max(total_raw - discount, 0)
-
-    await state.update_data(plan_id=plan_id, devices=devices)
-
-    price_line = f"└ 💲 К оплате: {final} ₽"
-    if discount > 0:
-        price_line = f"└ 💲 К оплате: {final} ₽ <s>{total_raw} ₽</s>"
-
-    msg = (
-        f"💎 <b>ПОДТВЕРЖДЕНИЕ ЗАКАЗА</b>\n\n"
-        f"├ 📊 Тариф: 💎 {plan.duration_days} дн. · {devices} устр\n"
-        f"├ 📱 Устройств: Стандарт ({devices})\n"
-        f"{price_line}"
+    s = get_settings()
+    if not s.YOOKASSA_SHOP_ID or not s.YOOKASSA_SECRET_KEY:
+        await smart_edit(callback, PROVIDER_UNAVAILABLE_MESSAGE, back_to_menu_keyboard())
+        return
+    await state.set_state(PaymentStates.waiting_for_amount)
+    await smart_edit(
+        callback,
+        f"💰 <b>ПОПОЛНЕНИЕ БАЛАНСА</b>\n\nВведите сумму (минимум {s.MIN_TOPUP_RUB:.0f} ₽):",
+        topup_amount_prompt_keyboard(),
     )
-    await smart_edit(callback, msg, order_confirm_keyboard(plan_id, devices, promo_applied, promo_str))
 
 
-@router.callback_query(F.data.startswith("confirm_pay:"))
-async def confirm_payment(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    await callback.answer()
-    parts = callback.data.split(":")
-    plan_id = int(parts[1])
-    devices = int(parts[2])
+@router.message(PaymentStates.waiting_for_amount)
+async def topup_amount_input(message: Message, session: AsyncSession, state: FSMContext):
+    await state.clear()
+    s = get_settings()
 
-    data = await state.get_data()
-    promo_code_id = data.get("promo_code_id")
-    discount = data.get("discount", 0)
-
-    plan = await session.get(Plan, plan_id)
-    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
-
-    total_raw = get_price(plan.duration_days, devices)
-    final = max(total_raw - discount, 0)
-
-    payment = Payment(
-        user_id=user.id,
-        plan_id=plan.id,
-        provider=PaymentProvider.freekassa,
-        amount=final,
-        promo_code_id=promo_code_id,
-        devices_count=devices,
-    )
-    session.add(payment)
-    await session.flush()
-
-    pay_url = fk_payment_url(final, payment.id)
-    await session.commit()
-
-    msg = (
-        f"💎 <b>ПЛАТЁЖ СФОРМИРОВАН</b>\n\n"
-        f"├ 📊 Тариф: 💎 {plan.duration_days} дн. · {devices} устр\n"
-        f"└ 💲 Сумма: {final} ₽\n\n"
-        f"Нажмите кнопку ниже для оплаты. Ссылка активна в течение 10 минут."
-    )
-    await smart_edit(callback, msg, payment_formed_keyboard(pay_url))
-
-
-def _get_sub_info(sub, plan):
-    now = datetime.now(timezone.utc)
-    started = sub.started_at
-    if started and not started.tzinfo:
-        started = started.replace(tzinfo=timezone.utc)
-    expires = sub.expires_at
-    if expires and not expires.tzinfo:
-        expires = expires.replace(tzinfo=timezone.utc)
-    total = max(1, (expires - started).days) if started else plan.duration_days
-    remaining = max(0, (expires - now).days)
-    return total, remaining
-
-
-@router.callback_query(F.data.startswith("upgrade_to:"))
-async def upgrade_confirm(callback: CallbackQuery, session: AsyncSession):
-    await callback.answer()
-    new_devices = int(callback.data.split(":")[1])
-
-    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
-    sub = await session.scalar(
-        select(Subscription).where(
-            Subscription.user_id == user.id,
-            Subscription.status == SubscriptionStatus.active,
-        ).order_by(Subscription.expires_at.desc())
-    )
-    if not sub:
-        await callback.answer("Нет активной подписки", show_alert=True)
+    try:
+        amount = float(message.text.strip().replace(",", "."))
+    except ValueError:
+        await message.answer("❌ Введите число, например: 200", reply_markup=back_to_menu_keyboard())
         return
 
-    plan = await session.get(Plan, sub.plan_id)
-    total, remaining = _get_sub_info(sub, plan)
-
-    cur_price = get_price(plan.duration_days, sub.devices_limit)
-    new_price = get_price(plan.duration_days, new_devices)
-    upgrade_cost = max(1, round((new_price - cur_price) * remaining / total))
-
-    msg = (
-        f"➕ <b>ДОБАВЛЕНИЕ УСТРОЙСТВ</b>\n\n"
-        f"├ 📱 Сейчас: {sub.devices_limit} устр\n"
-        f"├ 📱 Новый лимит: {new_devices} устр\n"
-        f"├ ⏳ Осталось: {remaining} дней\n"
-        f"└ 💲 Доплата: {upgrade_cost} ₽"
-    )
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"✅ Оплатить {upgrade_cost} ₽", callback_data=f"confirm_upgrade:{new_devices}", style=S)],
-        [InlineKeyboardButton(text="◀ Назад", callback_data="add_devices")],
-    ])
-    await smart_edit(callback, msg, keyboard)
-
-
-@router.callback_query(F.data.startswith("confirm_upgrade:"))
-async def confirm_upgrade(callback: CallbackQuery, session: AsyncSession):
-    await callback.answer()
-    new_devices = int(callback.data.split(":")[1])
-
-    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
-    sub = await session.scalar(
-        select(Subscription).where(
-            Subscription.user_id == user.id,
-            Subscription.status == SubscriptionStatus.active,
-        ).order_by(Subscription.expires_at.desc())
-    )
-    if not sub:
-        await callback.answer("Нет активной подписки", show_alert=True)
+    ok, error = _validate_topup_amount(amount, s.MIN_TOPUP_RUB)
+    if not ok:
+        await message.answer(error, reply_markup=back_to_menu_keyboard())
         return
 
-    plan = await session.get(Plan, sub.plan_id)
-    total, remaining = _get_sub_info(sub, plan)
+    user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
 
-    cur_price = get_price(plan.duration_days, sub.devices_limit)
-    new_price = get_price(plan.duration_days, new_devices)
-    upgrade_cost = max(1, round((new_price - cur_price) * remaining / total))
-
-    payment = Payment(
-        user_id=user.id,
-        plan_id=plan.id,
-        provider=PaymentProvider.freekassa,
-        amount=upgrade_cost,
-        devices_count=new_devices,
-        is_upgrade=True,
-    )
+    payment = Payment(user_id=user.id, provider=PaymentProvider.yookassa, amount=Decimal(str(amount)))
     session.add(payment)
     await session.flush()
-
-    pay_url = fk_payment_url(upgrade_cost, payment.id)
     await session.commit()
 
-    msg = (
-        f"💎 <b>ПЛАТЁЖ СФОРМИРОВАН</b>\n\n"
-        f"├ 📱 Апгрейд: {sub.devices_limit} → {new_devices} устр\n"
-        f"└ 💲 Сумма: {upgrade_cost} ₽\n\n"
-        f"Нажмите кнопку ниже для оплаты."
+    pay_url = await create_payment(amount, payment.id, "Пополнение баланса Zeus VPN")
+
+    await message.answer(
+        f"💰 <b>ПЛАТЁЖ СФОРМИРОВАН</b>\n\n└ 💲 Сумма: {amount:.0f} ₽\n\nНажмите кнопку ниже для оплаты.",
+        reply_markup=payment_formed_keyboard(pay_url),
     )
-    await smart_edit(callback, msg, payment_formed_keyboard(pay_url))
+
+
+@router.callback_query(F.data == "change_devices")
+async def change_devices_start(callback: CallbackQuery, session: AsyncSession):
+    await callback.answer()
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    await smart_edit(
+        callback,
+        f"🔢 <b>ЧИСЛО УСТРОЙСТВ</b>\n\nСейчас: {user.devices_limit}. Выберите новое значение — влияет на суточное списание:",
+        devices_count_keyboard(user.devices_limit),
+    )
+
+
+@router.callback_query(F.data.startswith("set_devices:"))
+async def set_devices(callback: CallbackQuery, session: AsyncSession):
+    await callback.answer()
+    new_limit = int(callback.data.split(":")[1])
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    user.devices_limit = new_limit
+    await session.commit()
+    await smart_edit(
+        callback,
+        f"✅ Число устройств обновлено: <b>{new_limit}</b>",
+        main_menu_keyboard(has_access=user.access_active),
+    )

@@ -6,7 +6,7 @@ from bot.services.promo import validate_promo, record_usage
 
 
 async def _make_user(session, telegram_id=111):
-    user = User(telegram_id=telegram_id, username="u", marzban_username=f"m{telegram_id}")
+    user = User(telegram_id=telegram_id, username="u")
     session.add(user)
     await session.flush()
     return user

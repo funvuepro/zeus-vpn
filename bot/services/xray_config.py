@@ -94,7 +94,7 @@ def _make_outbound(server: VpnServer, user_uuid: str, tag: str) -> dict:
     }
 
 
-def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "DS-VPN") -> dict:
+def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Zeus VPN") -> dict:
     primary = [s for s in servers if not s.is_backup]
     backup = [s for s in servers if s.is_backup]
 

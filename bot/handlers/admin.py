@@ -404,7 +404,7 @@ async def adm_servers(callback: CallbackQuery, session: AsyncSession):
     servers = (await session.execute(
         select(VpnServer).order_by(VpnServer.is_backup, VpnServer.id)
     )).scalars().all()
-    text = f"🖥 <b>Серверы DS-VPN</b> ({len(servers)} шт.)\n\n✅ — активен  ⛔️ — отключён  [резерв] — резервный"
+    text = f"🖥 <b>Серверы Zeus VPN</b> ({len(servers)} шт.)\n\n✅ — активен  ⛔️ — отключён  [резерв] — резервный"
     await callback.message.edit_text(text, reply_markup=admin_servers_keyboard(servers), parse_mode="HTML")
 
 
@@ -438,7 +438,7 @@ async def adm_srv_del(callback: CallbackQuery, session: AsyncSession):
         select(VpnServer).order_by(VpnServer.is_backup, VpnServer.id)
     )).scalars().all()
     await callback.message.edit_text(
-        f"🖥 <b>Серверы DS-VPN</b> ({len(servers)} шт.)",
+        f"🖥 <b>Серверы Zeus VPN</b> ({len(servers)} шт.)",
         reply_markup=admin_servers_keyboard(servers),
         parse_mode="HTML",
     )

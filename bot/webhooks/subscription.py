@@ -21,7 +21,7 @@ _PAGE_TEMPLATE = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DS-VPN — Подписка</title>
+<title>Zeus VPN — Подписка</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26' font-weight='900' font-family='Arial,sans-serif' fill='%233b82f6'%3EDS%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -183,7 +183,7 @@ body::before{content:'';position:fixed;top:0;left:50%;transform:translateX(-50%)
       <button class="hdr-btn" onclick="copyUrl()" title="Скопировать ссылку">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
       </button>
-      <a href="https://t.me/ds_vpnsupport" class="hdr-btn" title="Поддержка" target="_blank">
+      <a href="https://t.me/zeus_vpnsupport" class="hdr-btn" title="Поддержка" target="_blank">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 5L2 12.5l7 1M21 5l-2.5 15L9 13.5M21 5L9 13.5m0 0v5.5l3.5-3.5"/></svg>
       </a>
     </div>
@@ -452,7 +452,7 @@ def _proxy_headers(request: Request) -> dict:
 def _render_page(data: dict, sub_url: str, activity: dict | None = None) -> str:
     if not data.get("isFound"):
         return (
-            "<!doctype html><html><head><meta charset=UTF-8><title>DS-VPN</title></head>"
+            "<!doctype html><html><head><meta charset=UTF-8><title>Zeus VPN</title></head>"
             "<body style='background:#07080f;color:#e2e8f0;font-family:sans-serif;"
             "display:flex;align-items:center;justify-content:center;height:100vh;margin:0'>"
             "<h2>Подписка не найдена</h2></body></html>"
@@ -607,7 +607,7 @@ async def xray_config(token: str, request: Request):
         media_type="application/json",
         headers={
             "content-disposition": f'attachment; filename="ds-vpn-{username}.json"',
-            "profile-title": f"DS-VPN | {username}",
+            "profile-title": f"Zeus VPN | {username}",
             "profile-update-interval": "24",
             "subscription-userinfo": f"expire={days_left}",
         },

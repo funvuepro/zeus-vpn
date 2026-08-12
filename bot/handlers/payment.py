@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.config import get_settings
 from bot.database.models import Payment, PaymentProvider, User
 from bot.keyboards.inline import (
+    DEVICE_OPTIONS,
     back_to_menu_keyboard,
     devices_count_keyboard,
     main_menu_keyboard,
@@ -95,8 +96,18 @@ async def change_devices_start(callback: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data.startswith("set_devices:"))
 async def set_devices(callback: CallbackQuery, session: AsyncSession):
     await callback.answer()
-    new_limit = int(callback.data.split(":")[1])
+    # callback_data is attacker-controlled (any MTProto client can craft it):
+    # devices_limit == -1 would make the daily charge exactly 0.00 (free service),
+    # devices_limit == 0 would halve it. Only offered values are accepted.
+    try:
+        new_limit = int(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+    if new_limit not in DEVICE_OPTIONS:
+        return
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    if not user:
+        return
     user.devices_limit = new_limit
     await session.commit()
     await smart_edit(

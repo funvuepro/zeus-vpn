@@ -33,6 +33,22 @@ async def set_daily_rate_per_device(session: AsyncSession, value: Decimal) -> No
     await session.commit()
 
 
+async def reactivate_access(user: User, session: AsyncSession) -> None:
+    """Clear grace period and re-enable access after the balance is topped up.
+
+    Must be called by every code path that credits balance (payments, promo
+    codes) — run_daily_billing only processes users with access_active == True,
+    so a disabled user who is never reactivated stays excluded forever.
+    Does not commit; the caller owns the transaction.
+    """
+    if user.grace_started_at is not None:
+        user.grace_started_at = None
+    if not user.access_active:
+        user.access_active = True
+        if user.remnawave_uuid:
+            await remnawave.enable_user(user.remnawave_uuid)
+
+
 async def credit_topup(payment_id: int, amount: Decimal, external_id: str, session: AsyncSession) -> None:
     result = await session.execute(
         update(Payment)
@@ -47,12 +63,7 @@ async def credit_topup(payment_id: int, amount: Decimal, external_id: str, sessi
     user = await session.get(User, payment.user_id)
     user.balance += amount
 
-    if user.grace_started_at is not None:
-        user.grace_started_at = None
-    if not user.access_active:
-        user.access_active = True
-        if user.remnawave_uuid:
-            await remnawave.enable_user(user.remnawave_uuid)
+    await reactivate_access(user, session)
 
     await session.commit()
     await notify_user(user.telegram_id, f"⚡ Баланс пополнен на {amount} ₽. Текущий баланс: {user.balance} ₽")

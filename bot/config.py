@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     USER_AGREEMENT_URL: str = ""
     SSL_CERT_PATH: str = ""
     SSL_KEY_PATH: str = ""
+    # Explicit opt-in to running the payment webhook server without TLS.
+    # Only for local development — binds 127.0.0.1 instead of all interfaces.
+    WEBHOOK_INSECURE_DEV: bool = False
 
     model_config = SettingsConfigDict(env_file=".env")
 

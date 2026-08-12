@@ -81,10 +81,39 @@ async def _init_db():
             await session.commit()
 
 
+def build_uvicorn_kwargs(s) -> dict:
+    """Build uvicorn options for the payment webhook server.
+
+    Fails closed: the webhook receives YooKassa callbacks and must never be
+    served over plain HTTP unless a developer explicitly opts in, in which case
+    it is bound to loopback only.
+    """
+    kwargs = dict(host="0.0.0.0", port=8443, log_level="info")
+    if s.SSL_CERT_PATH and s.SSL_KEY_PATH:
+        kwargs["ssl_certfile"] = s.SSL_CERT_PATH
+        kwargs["ssl_keyfile"] = s.SSL_KEY_PATH
+        return kwargs
+
+    if not s.WEBHOOK_INSECURE_DEV:
+        raise RuntimeError(
+            "Refusing to start webhook server without TLS. "
+            "Set SSL_CERT_PATH and SSL_KEY_PATH, or set WEBHOOK_INSECURE_DEV=1 "
+            "for local development."
+        )
+    logging.warning(
+        "WEBHOOK_INSECURE_DEV is set — serving webhooks over plain HTTP on 127.0.0.1 only."
+    )
+    kwargs["host"] = "127.0.0.1"  # never bind all interfaces without TLS
+    return kwargs
+
+
 async def main():
     global _bot_instance
-    await _init_db()
     s = get_settings()
+    # Validate the TLS configuration before any side effects (DB init, Telegram
+    # API calls) so a misconfigured deployment fails immediately and loudly.
+    uvicorn_kwargs = build_uvicorn_kwargs(s)
+    await _init_db()
     bot = Bot(
         token=s.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -149,10 +178,6 @@ async def main():
     from bot.webhooks.app import create_app
 
     webhook_app = create_app()
-    uvicorn_kwargs = dict(host="0.0.0.0", port=8443, log_level="info")
-    if s.SSL_CERT_PATH and s.SSL_KEY_PATH:
-        uvicorn_kwargs["ssl_certfile"] = s.SSL_CERT_PATH
-        uvicorn_kwargs["ssl_keyfile"] = s.SSL_KEY_PATH
     config = uvicorn.Config(webhook_app, **uvicorn_kwargs)
     server = uvicorn.Server(config)
     server.install_signal_handlers = lambda: None

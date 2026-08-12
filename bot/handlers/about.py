@@ -14,6 +14,10 @@ from bot.services.remnawave import remnawave
 
 router = Router()
 
+# Far-future Remnawave-side expiry (~10 years). The balance model is the single
+# source of truth for access; Remnawave's expiry timer is deliberately inert.
+REMNAWAVE_EXPIRE_DAYS = 3650
+
 _PRIVACY = (
     "📄 <b>ПОЛИТИКА КОНФИДЕНЦИАЛЬНОСТИ Zeus VPN</b>\n"
     "<i>Редакция от 01.06.2025</i>\n\n"
@@ -98,7 +102,13 @@ async def accept_terms_handler(callback: CallbackQuery, session: AsyncSession):
 
     if not user.remnawave_uuid:
         try:
-            _, remnawave_uuid = await remnawave.create_user(f"user_{user.telegram_id}", expire_days=3)
+            # Access is governed solely by the balance-billing scheduler
+            # (access_active + enable_user/disable_user). Remnawave's own expiry
+            # timer must never gate access, so provision it far in the future —
+            # nothing in the balance model ever extends it.
+            _, remnawave_uuid = await remnawave.create_user(
+                f"user_{user.telegram_id}", expire_days=REMNAWAVE_EXPIRE_DAYS
+            )
             user.remnawave_uuid = remnawave_uuid
         except Exception as e:
             logging.warning(f"Remnawave provisioning failed for user {user.telegram_id}: {e}")

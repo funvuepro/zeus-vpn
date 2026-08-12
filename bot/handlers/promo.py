@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User
+from bot.services.balance import reactivate_access
 from bot.services.promo import validate_promo, record_usage
 from bot.services.promo_admin import create_promo, delete_promo, list_promos
 
@@ -95,6 +96,8 @@ async def promo_code_input(message: Message, session: AsyncSession, state: FSMCo
 
 async def redeem_promo_code(message: Message, session: AsyncSession) -> None:
     user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
+    if not user:
+        return
     promo, error = await validate_promo(session, message.text.strip(), user.id)
 
     if error:
@@ -104,6 +107,9 @@ async def redeem_promo_code(message: Message, session: AsyncSession) -> None:
     from decimal import Decimal
     user.balance += Decimal(promo.amount)
     await record_usage(session, promo.id, user.id)
+    # Topping up via promo must lift a grace period / disabled state, exactly
+    # like a paid top-up does — otherwise daily billing skips the user forever.
+    await reactivate_access(user, session)
     await session.commit()
 
     await message.answer(

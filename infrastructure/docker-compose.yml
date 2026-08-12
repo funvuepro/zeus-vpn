@@ -1,66 +1,54 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: vpnbot
-      POSTGRES_USER: vpnbot
+      POSTGRES_DB: zeusvpn
+      POSTGRES_USER: zeusvpn
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vpnbot"]
+      test: ["CMD-SHELL", "pg_isready -U zeusvpn"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # Single process: aiogram polling + the payment webhook HTTP server (port 8443)
+  # are started together by bot/main.py. Do NOT run uvicorn separately — a
+  # standalone webhook process never imports bot.main, so balance.notify_user /
+  # referral.notify_user stay no-op stubs and users get no notifications.
   bot:
     build:
       context: ..
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgresql+asyncpg://vpnbot:${DB_PASSWORD}@postgres:5432/vpnbot
       BOT_TOKEN: ${BOT_TOKEN}
-      MARZBAN_URL: ${MARZBAN_URL}
-      MARZBAN_USERNAME: ${MARZBAN_USERNAME}
-      MARZBAN_PASSWORD: ${MARZBAN_PASSWORD}
-      CRYPTOBOT_TOKEN: ${CRYPTOBOT_TOKEN}
-      LAVA_API_KEY: ${LAVA_API_KEY}
-      LAVA_SHOP_ID: ${LAVA_SHOP_ID}
+      DATABASE_URL: postgresql+asyncpg://zeusvpn:${DB_PASSWORD}@postgres:5432/zeusvpn
+      REMNAWAVE_URL: ${REMNAWAVE_URL}
+      REMNAWAVE_API_TOKEN: ${REMNAWAVE_API_TOKEN}
+      SUBSCRIPTION_HOST: ${SUBSCRIPTION_HOST:-}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      MIN_TOPUP_RUB: ${MIN_TOPUP_RUB:-100.0}
       WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET}
       BOT_USERNAME: ${BOT_USERNAME}
+      PRIVACY_URL: ${PRIVACY_URL:-}
+      USER_AGREEMENT_URL: ${USER_AGREEMENT_URL:-}
+      SSL_CERT_PATH: ${SSL_CERT_PATH:-}
+      SSL_KEY_PATH: ${SSL_KEY_PATH:-}
+      WEBHOOK_INSECURE_DEV: ${WEBHOOK_INSECURE_DEV:-0}
+    volumes:
+      # TLS material for the webhook server; adjust or drop if terminating TLS upstream.
+      - ./certs:/certs:ro
+    ports:
+      - "8443:8443"
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
     command: python -m bot.main
-
-  webhook:
-    build:
-      context: ..
-      dockerfile: Dockerfile
-    environment:
-      DATABASE_URL: postgresql+asyncpg://vpnbot:${DB_PASSWORD}@postgres:5432/vpnbot
-      BOT_TOKEN: ${BOT_TOKEN}
-      CRYPTOBOT_TOKEN: ${CRYPTOBOT_TOKEN}
-      LAVA_API_KEY: ${LAVA_API_KEY}
-      LAVA_SHOP_ID: ${LAVA_SHOP_ID}
-      WEBHOOK_BASE_URL: ${WEBHOOK_BASE_URL}
-      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
-      BOT_USERNAME: ${BOT_USERNAME}
-      MARZBAN_URL: ${MARZBAN_URL}
-      MARZBAN_USERNAME: ${MARZBAN_USERNAME}
-      MARZBAN_PASSWORD: ${MARZBAN_PASSWORD}
-    depends_on:
-      postgres:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:8001:8001"
-    restart: unless-stopped
-    command: uvicorn bot.webhooks.app:app --host 0.0.0.0 --port 8001
 
 volumes:
   postgres_data:

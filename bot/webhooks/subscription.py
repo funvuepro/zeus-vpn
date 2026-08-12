@@ -22,7 +22,7 @@ _PAGE_TEMPLATE = """\
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Zeus VPN — Подписка</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26' font-weight='900' font-family='Arial,sans-serif' fill='%233b82f6'%3EDS%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26' font-weight='900' font-family='Arial,sans-serif' fill='%233b82f6'%3EZ%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
@@ -178,7 +178,7 @@ body::before{content:'';position:fixed;top:0;left:50%;transform:translateX(-50%)
 <div class="wrap">
 
   <div class="hdr">
-    <div class="logo"><span class="logo-ds">DS</span><span class="logo-vpn">-VPN</span></div>
+    <div class="logo"><span class="logo-ds">Zeus</span><span class="logo-vpn"> VPN</span></div>
     <div class="hdr-btns">
       <button class="hdr-btn" onclick="copyUrl()" title="Скопировать ссылку">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -606,7 +606,7 @@ async def xray_config(token: str, request: Request):
         content=_json.dumps(config, ensure_ascii=False, indent=2),
         media_type="application/json",
         headers={
-            "content-disposition": f'attachment; filename="ds-vpn-{username}.json"',
+            "content-disposition": f'attachment; filename="zeus-vpn-{username}.json"',
             "profile-title": f"Zeus VPN | {username}",
             "profile-update-interval": "24",
             "subscription-userinfo": f"expire={days_left}",

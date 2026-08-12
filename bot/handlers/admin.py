@@ -8,13 +8,11 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import (
-    Payment, PaymentStatus, Plan, Subscription, SubscriptionStatus, User, VpnServer,
-)
+from bot.database.models import Payment, PaymentStatus, User, VpnServer
 from bot.keyboards.admin import (
     admin_back_keyboard, admin_broadcast_confirm_keyboard, admin_instructions_keyboard,
     admin_main_keyboard, admin_photos_keyboard, admin_promos_keyboard, admin_servers_keyboard,
-    admin_subs_keyboard, admin_user_keyboard, admin_users_keyboard,
+    admin_user_keyboard, admin_users_keyboard,
 )
 from bot.services.promo_admin import create_promo, delete_promo, list_promos
 
@@ -26,7 +24,7 @@ class AdminStates(StatesGroup):
     broadcast_text = State()
     new_promo_input = State()
     edit_instruction = State()
-    give_sub_days = State()
+    set_rate = State()
     add_server = State()
     set_photo = State()
 
@@ -72,9 +70,10 @@ async def adm_stats(callback: CallbackQuery, session: AsyncSession):
         return
 
     total_users = await session.scalar(select(func.count(User.id))) or 0
-    active_subs = await session.scalar(
-        select(func.count(Subscription.id)).where(Subscription.status == SubscriptionStatus.active)
+    active_access = await session.scalar(
+        select(func.count(User.id)).where(User.access_active == True)
     ) or 0
+    total_balance = await session.scalar(select(func.sum(User.balance))) or 0
     total_revenue = await session.scalar(
         select(func.sum(Payment.amount)).where(Payment.status == PaymentStatus.paid)
     ) or 0
@@ -84,11 +83,12 @@ async def adm_stats(callback: CallbackQuery, session: AsyncSession):
     ) or 0
 
     await callback.message.edit_text(
-        f"📊 <b>Статистика DS-VPN</b>\n\n"
+        f"📊 <b>Статистика Zeus VPN</b>\n\n"
         f"👥 Всего пользователей: <b>{total_users}</b>\n"
         f"🆕 Новых сегодня: <b>{new_today}</b>\n"
-        f"📶 Активных подписок: <b>{active_subs}</b>\n"
-        f"💰 Общая выручка: <b>{round(float(total_revenue))} ₽</b>",
+        f"⚡ С активным доступом: <b>{active_access}</b>\n"
+        f"💰 Суммарный баланс пользователей: <b>{round(float(total_balance))} ₽</b>\n"
+        f"💳 Общая выручка: <b>{round(float(total_revenue))} ₽</b>",
         reply_markup=admin_back_keyboard(),
     )
 
@@ -149,24 +149,16 @@ async def adm_user(callback: CallbackQuery, session: AsyncSession):
 
 
 async def _show_user(send_fn, user: User, session: AsyncSession):
-    sub = await session.scalar(
-        select(Subscription).where(
-            Subscription.user_id == user.id,
-            Subscription.status == SubscriptionStatus.active,
-        )
-    )
-    sub_line = (
-        f"📶 Подписка до {sub.expires_at.strftime('%d.%m.%Y')} ({sub.devices_limit} устр.)"
-        if sub else "❌ Нет подписки"
-    )
     banned = "🚫 Забанен" if user.is_banned else "✅ Активен"
+    access = "✅ Доступ активен" if user.access_active else "❌ Доступ отключён"
     await send_fn(
         f"👤 <b>Пользователь #{user.telegram_id}</b>\n\n"
         f"Telegram ID: <code>{user.telegram_id}</code>\n"
         f"Username: @{user.username or '—'}\n"
         f"Статус: {banned}\n"
-        f"Бонусных дней: {user.bonus_days}\n"
-        f"{sub_line}",
+        f"{access}\n"
+        f"💰 Баланс: {user.balance} ₽\n"
+        f"📱 Устройств: {user.devices_limit}",
         reply_markup=admin_user_keyboard(user.id, user.is_banned),
     )
 
@@ -195,161 +187,37 @@ async def adm_unban(callback: CallbackQuery, session: AsyncSession):
     await _show_user(callback.message.edit_text, user, session)
 
 
-# ── Give subscription ─────────────────────────────────────────────────────────
+# ── Daily rate ────────────────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("adm_give_sub:"))
-async def adm_give_sub(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
+@router.callback_query(F.data == "adm_set_rate")
+async def adm_set_rate_start(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
     await callback.answer()
     if not await _get_admin(session, callback.from_user.id):
         return
-    user_id = int(callback.data.split(":")[1])
-    await state.set_state(AdminStates.give_sub_days)
-    await state.update_data(user_id=user_id)
+    from bot.services.balance import get_daily_rate_per_device
+    current = await get_daily_rate_per_device(session)
+    await state.set_state(AdminStates.set_rate)
     await callback.message.edit_text(
-        "📅 Введи количество дней:\n"
-        "<b>+число</b> — добавить дни\n"
-        "<b>−число</b> — убрать (например: -30)",
-        parse_mode="HTML",
+        f"⚡ Текущая ставка: <b>{current} ₽</b>/устройство/день\n\nВведи новую ставку (например: 1.50):",
     )
 
 
-@router.message(AdminStates.give_sub_days)
-async def adm_give_sub_days(message: Message, session: AsyncSession, state: FSMContext):
-    try:
-        await _adm_give_sub_days_impl(message, session, state)
-    except Exception as e:
-        await state.clear()
-        await message.answer(f"❌ Ошибка: <code>{e}</code>", parse_mode="HTML", reply_markup=admin_back_keyboard())
-
-
-async def _adm_give_sub_days_impl(message: Message, session: AsyncSession, state: FSMContext):
-    data = await state.get_data()
-    user_id = data.get("user_id")
+@router.message(AdminStates.set_rate)
+async def adm_set_rate_input(message: Message, session: AsyncSession, state: FSMContext):
     await state.clear()
-
     if not await _get_admin(session, message.from_user.id):
         return
-
-    if not user_id:
-        await message.answer("❌ Сессия устарела. Открой карточку пользователя заново.", reply_markup=admin_back_keyboard())
-        return
-
+    from decimal import Decimal, InvalidOperation
+    from bot.services.balance import set_daily_rate_per_device
     try:
-        days = int(message.text.strip().replace("−", "-"))
-        if days == 0:
-            raise ValueError
-    except ValueError:
-        await message.answer("❌ Введи ненулевое целое число (например: 30 или -15)", reply_markup=admin_back_keyboard(f"adm_user:{user_id}"))
+        value = Decimal(message.text.strip().replace(",", "."))
+        if value <= 0:
+            raise InvalidOperation
+    except InvalidOperation:
+        await message.answer("❌ Введи положительное число, например: 1.50", reply_markup=admin_back_keyboard())
         return
-    user = await session.get(User, user_id)
-    if not user:
-        await message.answer("❌ Пользователь не найден", reply_markup=admin_back_keyboard())
-        return
-
-    from bot.services.remnawave import remnawave
-
-    existing_sub = await session.scalar(
-        select(Subscription).where(
-            Subscription.user_id == user_id,
-            Subscription.status == SubscriptionStatus.active,
-        )
-    )
-
-    now = datetime.now(timezone.utc)
-
-    if existing_sub and existing_sub.expires_at.tzinfo is None:
-        existing_sub.expires_at = existing_sub.expires_at.replace(tzinfo=timezone.utc)
-
-    if days > 0 and not existing_sub:
-        plan = await session.scalar(select(Plan).where(Plan.is_active == True).limit(1))
-        username = f"user_{user.telegram_id}"
-        expires_at = now + timedelta(days=days)
-        devices_limit = plan.devices_limit if plan else 1
-        try:
-            if not user.remnawave_uuid:
-                _, rw_uuid = await remnawave.create_user(username, days)
-                user.remnawave_uuid = rw_uuid
-        except Exception as e:
-            await message.answer(f"❌ Ошибка RemnaWave: {e}", reply_markup=admin_back_keyboard(f"adm_user:{user_id}"))
-            return
-        sub = Subscription(
-            user_id=user_id,
-            plan_id=plan.id if plan else 1,
-            devices_limit=devices_limit,
-            expires_at=expires_at,
-            status=SubscriptionStatus.active,
-        )
-        session.add(sub)
-        await session.commit()
-        result_text = f"✅ Создана подписка на <b>{days} дн.</b>"
-    elif not existing_sub:
-        await message.answer("❌ У пользователя нет активной подписки", reply_markup=admin_back_keyboard(f"adm_user:{user_id}"))
-        return
-    else:
-        new_expires = existing_sub.expires_at + timedelta(days=days)
-        if new_expires <= now:
-            existing_sub.expires_at = now
-            existing_sub.status = SubscriptionStatus.expired
-            await session.commit()
-            try:
-                if user.remnawave_uuid:
-                    await remnawave.disable_user(user.remnawave_uuid)
-            except Exception:
-                pass
-            result_text = "🚫 Подписка деактивирована (дата ушла в прошлое)"
-        else:
-            existing_sub.expires_at = new_expires
-            await session.commit()
-            try:
-                if user.remnawave_uuid:
-                    await remnawave.extend_user(f"user_{user.telegram_id}", new_expires)
-            except Exception as e:
-                await message.answer(
-                    f"⚠️ БД обновлена, но RemnaWave недоступен: {e}\nПодписка в БД: до {new_expires.strftime('%d.%m.%Y')}",
-                    reply_markup=admin_back_keyboard(f"adm_user:{user_id}"),
-                    parse_mode="HTML",
-                )
-                return
-            sign = "+" if days > 0 else ""
-            result_text = f"✅ Подписка изменена на <b>{sign}{days} дн.</b> (до {new_expires.strftime('%d.%m.%Y')})"
-
-    await message.answer(
-        f"{result_text}\nПользователь #{user.telegram_id}",
-        reply_markup=admin_back_keyboard(f"adm_user:{user_id}"),
-        parse_mode="HTML",
-    )
-
-
-# ── Active subscriptions ──────────────────────────────────────────────────────
-
-@router.callback_query(F.data.startswith("adm_subs:"))
-async def adm_subs(callback: CallbackQuery, session: AsyncSession):
-    await callback.answer()
-    if not await _get_admin(session, callback.from_user.id):
-        return
-    page = int(callback.data.split(":")[1])
-    total = await session.scalar(
-        select(func.count(Subscription.id)).where(Subscription.status == SubscriptionStatus.active)
-    ) or 0
-    rows = (await session.execute(
-        select(Subscription, User.telegram_id)
-        .join(User, User.id == Subscription.user_id)
-        .where(Subscription.status == SubscriptionStatus.active)
-        .order_by(Subscription.expires_at)
-        .offset(page * PAGE_SIZE).limit(PAGE_SIZE)
-    )).all()
-
-    class _SubRow:
-        def __init__(self, sub, telegram_id):
-            self.user_id = sub.user_id
-            self.expires_at = sub.expires_at
-            self.display_id = telegram_id
-
-    subs = [_SubRow(r[0], r[1]) for r in rows]
-    await callback.message.edit_text(
-        f"💳 <b>Активные подписки</b> (стр. {page + 1})",
-        reply_markup=admin_subs_keyboard(subs, page, total, PAGE_SIZE),
-    )
+    await set_daily_rate_per_device(session, value)
+    await message.answer(f"✅ Ставка обновлена: <b>{value} ₽</b>/устройство/день", reply_markup=admin_back_keyboard())
 
 
 # ── Promo codes ───────────────────────────────────────────────────────────────

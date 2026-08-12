@@ -4,7 +4,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 def admin_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Пользователи", callback_data="adm_users:0")],
-        [InlineKeyboardButton(text="💳 Подписки", callback_data="adm_subs:0")],
+        [InlineKeyboardButton(text="⚡ Ставка/день", callback_data="adm_set_rate")],
         [InlineKeyboardButton(text="📊 Статистика", callback_data="adm_stats")],
         [InlineKeyboardButton(text="🏷 Промокоды", callback_data="adm_promos")],
         [InlineKeyboardButton(text="🖥 Серверы", callback_data="adm_servers")],
@@ -59,40 +59,9 @@ def admin_user_keyboard(user_id: int, is_banned: bool) -> InlineKeyboardMarkup:
         else InlineKeyboardButton(text="🚫 Забанить", callback_data=f"adm_ban:{user_id}")
     )
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📅 Добавить / убрать дни", callback_data=f"adm_give_sub:{user_id}")],
         [ban_btn],
         [InlineKeyboardButton(text="◀️ Назад", callback_data="adm_users:0")],
     ])
-
-
-def admin_plans_keyboard(plans: list, user_id: int) -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton(
-            text=f"{p.name} — {round(p.price)} ₽ ({p.duration_days} дн.)",
-            callback_data=f"adm_give_confirm:{user_id}:{p.id}",
-        )]
-        for p in plans
-    ]
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data=f"adm_user:{user_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def admin_subs_keyboard(subs: list, page: int, total: int, page_size: int = 10) -> InlineKeyboardMarkup:
-    buttons = []
-    for s in subs:
-        buttons.append([InlineKeyboardButton(
-            text=f"#{s.display_id} — до {s.expires_at.strftime('%d.%m.%Y')}",
-            callback_data=f"adm_user:{s.user_id}",
-        )])
-    nav = []
-    if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"adm_subs:{page - 1}"))
-    if (page + 1) * page_size < total:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"adm_subs:{page + 1}"))
-    if nav:
-        buttons.append(nav)
-    buttons.append([InlineKeyboardButton(text="◀️ Меню", callback_data="adm_menu")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def admin_promos_keyboard(promos: list) -> InlineKeyboardMarkup:

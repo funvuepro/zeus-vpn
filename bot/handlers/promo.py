@@ -1,16 +1,14 @@
-from aiogram import F, Router
+from aiogram import Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.database.models import Plan, User
-from bot.keyboards.inline import order_confirm_keyboard, get_price
-from bot.services.promo import validate_promo
+from bot.database.models import User
+from bot.services.promo import validate_promo, record_usage
 from bot.services.promo_admin import create_promo, delete_promo, list_promos
-from bot.utils import smart_edit
 
 router = Router()
 
@@ -83,63 +81,33 @@ async def cmd_delete_promo(message: Message, session: AsyncSession):
         await message.answer(f"❌ Промокод <b>{code}</b> не найден", parse_mode="HTML")
 
 
-@router.callback_query(F.data.startswith("promo_apply_order:"))
-async def promo_apply_order(callback: CallbackQuery, state: FSMContext):
-    await callback.answer()
-    parts = callback.data.split(":")
-    plan_id = int(parts[1])
-    devices = int(parts[2])
-    await state.update_data(plan_id=plan_id, devices=devices)
+@router.message(Command("promo"))
+async def cmd_promo_prompt(message: Message, state: FSMContext):
     await state.set_state(PromoStates.waiting_for_code)
-    await smart_edit(callback, "🏷 Введи промокод:")
-
-
-@router.callback_query(F.data.startswith("promo_cancel_order:"))
-async def promo_cancel_order(callback: CallbackQuery, session: AsyncSession, state: FSMContext):
-    await callback.answer()
-    parts = callback.data.split(":")
-    plan_id = int(parts[1])
-    devices = int(parts[2])
-    await state.update_data(promo_code_id=None, discount=0, promo_str="")
-
-    plan = await session.get(Plan, plan_id)
-    final = get_price(plan.duration_days, devices)
-
-    msg = (
-        f"💎 <b>ПОДТВЕРЖДЕНИЕ ЗАКАЗА</b>\n\n"
-        f"├ 📊 Тариф: 💎 {plan.duration_days} дн. · {devices} устр\n"
-        f"├ 📱 Устройств: Стандарт ({devices})\n"
-        f"└ 💲 К оплате: {final} ₽"
-    )
-    await smart_edit(callback, msg, order_confirm_keyboard(plan_id, devices))
+    await message.answer("🏷 Введи промокод:")
 
 
 @router.message(PromoStates.waiting_for_code)
 async def promo_code_input(message: Message, session: AsyncSession, state: FSMContext):
-    data = await state.get_data()
-    plan_id = data.get("plan_id")
-    devices = data.get("devices", 1)
+    await state.clear()
+    await redeem_promo_code(message, session)
 
+
+async def redeem_promo_code(message: Message, session: AsyncSession) -> None:
     user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
     promo, error = await validate_promo(session, message.text.strip(), user.id)
 
     if error:
         await message.answer(error)
-        await state.set_state(None)
         return
 
-    await state.set_state(None)
-    await state.update_data(promo_code_id=promo.id, discount=promo.amount, promo_str=promo.code)
+    from decimal import Decimal
+    user.balance += Decimal(promo.amount)
+    await record_usage(session, promo.id, user.id)
+    await session.commit()
 
-    plan = await session.get(Plan, plan_id)
-    total_raw = get_price(plan.duration_days, devices)
-    final = max(total_raw - promo.amount, 0)
-
-    msg = (
-        f"✅ Промокод <b>{promo.code}</b> применён!\n\n"
-        f"💎 <b>ПОДТВЕРЖДЕНИЕ ЗАКАЗА</b>\n\n"
-        f"├ 📊 Тариф: 💎 {plan.duration_days} дн. · {devices} устр\n"
-        f"├ 📱 Устройств: Стандарт ({devices})\n"
-        f"└ 💲 К оплате: {final} ₽ <s>{total_raw} ₽</s>"
+    await message.answer(
+        f"✅ Промокод <b>{promo.code}</b> применён! На баланс зачислено <b>{promo.amount} ₽</b>.\n"
+        f"Текущий баланс: <b>{user.balance} ₽</b>",
+        parse_mode="HTML",
     )
-    await message.answer(msg, reply_markup=order_confirm_keyboard(plan_id, devices, True, promo.code), parse_mode="HTML")

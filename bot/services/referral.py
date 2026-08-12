@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -50,7 +51,14 @@ async def grant_referral_bonus(user: User, session: AsyncSession) -> None:
     from bot.services.balance import reactivate_access  # deferred: balance imports this module
 
     referrer.balance += REFERRAL_BONUS_RUB
-    await reactivate_access(referrer, session)
+    try:
+        await reactivate_access(referrer, session)
+    except Exception as e:
+        # This runs after credit_topup's own commit, so a Remnawave hiccup here
+        # must not prevent the bonus itself from committing — otherwise the
+        # payment is already flipped to paid (idempotency check blocks retries)
+        # and the referral bonus would be lost permanently, not just delayed.
+        logging.warning(f"Remnawave reactivation failed for referrer {referrer.telegram_id}: {e}")
     user.referral_bonus_granted = True
     await session.commit()
     await notify_user(referrer.telegram_id, f"⚡ +{REFERRAL_BONUS_RUB} ₽ на баланс за приглашённого друга!")

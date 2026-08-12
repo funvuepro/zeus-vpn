@@ -107,3 +107,37 @@ async def test_grant_referral_bonus_reactivates_disabled_referrer(db_session):
     assert referrer.balance == REFERRAL_BONUS_RUB
     assert referrer.access_active is True
     assert referrer.grace_started_at is None
+
+
+async def test_grant_referral_bonus_survives_remnawave_failure(db_session):
+    # grant_referral_bonus runs after credit_topup's own commit, so a
+    # Remnawave error here must not roll back the bonus credit — the payment
+    # is already marked paid by that point, so a lost bonus can never be
+    # retried.
+    referrer = User(
+        telegram_id=608, username="referrer5", balance=Decimal("0.00"),
+        access_active=False, grace_started_at=datetime.now(timezone.utc),
+        remnawave_uuid="uuid-ref2",
+    )
+    db_session.add(referrer)
+    await db_session.commit()
+
+    invited = User(telegram_id=609, username="invited5", referred_by=referrer.id, balance=Decimal("0.00"))
+    db_session.add(invited)
+    await db_session.commit()
+
+    payment = Payment(
+        user_id=invited.id, provider=PaymentProvider.yookassa,
+        amount=Decimal("150.00"), status=PaymentStatus.paid,
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    with patch("bot.services.balance.remnawave") as mock_remnawave:
+        mock_remnawave.enable_user = AsyncMock(side_effect=RuntimeError("remnawave down"))
+        await grant_referral_bonus(invited, db_session)
+
+    await db_session.refresh(referrer)
+    await db_session.refresh(invited)
+    assert referrer.balance == REFERRAL_BONUS_RUB
+    assert invited.referral_bonus_granted is True

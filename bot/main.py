@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
 from bot.database.session import AsyncSessionLocal
-from bot.handlers import about, admin, devices, fallback, instruction, menu, payment, promo, referral, start, subscription
+from bot.handlers import about, admin, devices, fallback, instruction, menu, payment, promo, referral, start
 
 logging.basicConfig(level=logging.INFO)
 
@@ -68,46 +68,17 @@ async def ban_middleware(handler, event, data):
 
 async def _init_db():
     from bot.database.session import engine
-    from bot.database.models import Base
+    from bot.database.models import Base, AppSettings
     from sqlalchemy import text
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-        result = await conn.execute(text("PRAGMA table_info(users)"))
-        existing_columns = [row[1] for row in result]
-        if "remnawave_uuid" not in existing_columns:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN remnawave_uuid VARCHAR"))
-        if "terms_accepted" not in existing_columns:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN terms_accepted BOOLEAN DEFAULT 0 NOT NULL"))
-        if "terms_accepted_at" not in existing_columns:
-            await conn.execute(text("ALTER TABLE users ADD COLUMN terms_accepted_at DATETIME"))
-
-        result = await conn.execute(text("PRAGMA table_info(subscriptions)"))
-        sub_columns = [row[1] for row in result]
-        if "is_trial" not in sub_columns:
-            await conn.execute(text("ALTER TABLE subscriptions ADD COLUMN is_trial BOOLEAN DEFAULT 0 NOT NULL"))
-        if "trial_notified" not in sub_columns:
-            await conn.execute(text("ALTER TABLE subscriptions ADD COLUMN trial_notified BOOLEAN DEFAULT 0 NOT NULL"))
-
-        result = await conn.execute(text("PRAGMA table_info(payments)"))
-        pay_columns = [row[1] for row in result]
-        if "devices_count" not in pay_columns:
-            await conn.execute(text("ALTER TABLE payments ADD COLUMN devices_count INTEGER"))
-        if "is_upgrade" not in pay_columns:
-            await conn.execute(text("ALTER TABLE payments ADD COLUMN is_upgrade BOOLEAN DEFAULT 0 NOT NULL"))
-
-        # Update plan prices to match new pricing table
-        await conn.execute(text("UPDATE plans SET price = 149 WHERE duration_days = 30 AND is_active = 1"))
-        await conn.execute(text("UPDATE plans SET price = 399 WHERE duration_days = 90 AND is_active = 1"))
-        await conn.execute(text("UPDATE plans SET price = 749 WHERE duration_days = 180 AND is_active = 1"))
-        await conn.execute(text("UPDATE plans SET price = 1249 WHERE duration_days = 360 AND is_active = 1"))
-
-        result = await conn.execute(text("SELECT id FROM plans WHERE name = 'Пробный период' AND price = 0"))
-        if not result.fetchone():
-            await conn.execute(text(
-                "INSERT INTO plans (name, duration_days, price, is_active, devices_limit) "
-                "VALUES ('Пробный период', 3, 0, 0, 1)"
-            ))
+    from bot.database.session import AsyncSessionLocal
+    async with AsyncSessionLocal() as session:
+        existing = await session.get(AppSettings, 1)
+        if existing is None:
+            session.add(AppSettings(id=1, daily_rate_per_device=1.00))
+            await session.commit()
 
 
 async def main():
@@ -120,7 +91,8 @@ async def main():
     )
     _bot_instance = bot
 
-    from bot.services import subscription as sub_service
+    from bot.services import balance as balance_service
+    from bot.services import referral as referral_service
 
     async def _notify(telegram_id: int, text: str):
         try:
@@ -128,7 +100,8 @@ async def main():
         except Exception:
             pass
 
-    sub_service.notify_user = _notify
+    balance_service.notify_user = _notify
+    referral_service.notify_user = _notify
     dp = Dispatcher()
     dp.update.middleware(session_middleware)
     dp.update.middleware(ban_middleware)
@@ -139,28 +112,21 @@ async def main():
     dp.include_router(instruction.router)
     dp.include_router(menu.router)
     dp.include_router(devices.router)
-    dp.include_router(subscription.router)
     dp.include_router(payment.router)
     dp.include_router(referral.router)
     dp.include_router(promo.router)
     dp.include_router(fallback.router)  # must be last
 
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from bot.scheduler.tasks import (
-        deactivate_expired_subscriptions,
-        notify_expiring_subscriptions,
-        notify_trial_expiring,
-    )
+    from bot.scheduler.tasks import run_daily_billing
 
-    scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(notify_expiring_subscriptions, "interval", hours=12)
-    scheduler.add_job(deactivate_expired_subscriptions, "interval", hours=1)
-    scheduler.add_job(notify_trial_expiring, "interval", hours=1)
+    scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
+    scheduler.add_job(run_daily_billing, "cron", hour=0, minute=0)
     scheduler.start()
 
     from aiogram.types import BotCommandScopeDefault, BotCommandScopeChat
     await bot.set_my_commands(
-        [BotCommand(command="start", description="Главное меню DS-VPN")],
+        [BotCommand(command="start", description="Главное меню Zeus VPN")],
         scope=BotCommandScopeDefault(),
     )
     # Show /admin only to admins
@@ -172,7 +138,7 @@ async def main():
         try:
             await bot.set_my_commands(
                 [
-                    BotCommand(command="start", description="Главное меню DS-VPN"),
+                    BotCommand(command="start", description="Главное меню Zeus VPN"),
                     BotCommand(command="admin", description="Панель администратора"),
                 ],
                 scope=BotCommandScopeChat(chat_id=_admin.telegram_id),
@@ -183,14 +149,11 @@ async def main():
     from bot.webhooks.app import create_app
 
     webhook_app = create_app()
-    config = uvicorn.Config(
-        webhook_app,
-        host="0.0.0.0",
-        port=8443,
-        log_level="info",
-        ssl_certfile="/etc/letsencrypt/live/dsvpnservice.ru/fullchain.pem",
-        ssl_keyfile="/etc/letsencrypt/live/dsvpnservice.ru/privkey.pem",
-    )
+    uvicorn_kwargs = dict(host="0.0.0.0", port=8443, log_level="info")
+    if s.SSL_CERT_PATH and s.SSL_KEY_PATH:
+        uvicorn_kwargs["ssl_certfile"] = s.SSL_CERT_PATH
+        uvicorn_kwargs["ssl_keyfile"] = s.SSL_KEY_PATH
+    config = uvicorn.Config(webhook_app, **uvicorn_kwargs)
     server = uvicorn.Server(config)
     server.install_signal_handlers = lambda: None
 

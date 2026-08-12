@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     BOT_USERNAME: str
     PRIVACY_URL: str = ""
     USER_AGREEMENT_URL: str = ""
+    SSL_CERT_PATH: str = ""
+    SSL_KEY_PATH: str = ""
 
     model_config = SettingsConfigDict(env_file=".env")
 

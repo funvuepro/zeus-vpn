@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
@@ -100,18 +100,23 @@ async def accept_terms_handler(callback: CallbackQuery, session: AsyncSession):
     user.terms_accepted = True
     user.terms_accepted_at = datetime.now(timezone.utc)
 
-    if not user.remnawave_uuid:
-        try:
-            # Access is governed solely by the balance-billing scheduler
-            # (access_active + enable_user/disable_user). Remnawave's own expiry
-            # timer must never gate access, so provision it far in the future —
-            # nothing in the balance model ever extends it.
+    # Access is governed solely by the balance-billing scheduler
+    # (access_active + enable_user/disable_user). Remnawave's own expiry
+    # timer must never gate access, so provision/extend it far in the future —
+    # nothing in the balance model ever extends it. Users provisioned before
+    # this far-future policy shipped still have a near-term expireAt, so
+    # existing users are extended here too, not just newly-created ones.
+    far_future = datetime.now(timezone.utc) + timedelta(days=REMNAWAVE_EXPIRE_DAYS)
+    try:
+        if not user.remnawave_uuid:
             _, remnawave_uuid = await remnawave.create_user(
                 f"user_{user.telegram_id}", expire_days=REMNAWAVE_EXPIRE_DAYS
             )
             user.remnawave_uuid = remnawave_uuid
-        except Exception as e:
-            logging.warning(f"Remnawave provisioning failed for user {user.telegram_id}: {e}")
+        else:
+            await remnawave.extend_user(f"user_{user.telegram_id}", far_future)
+    except Exception as e:
+        logging.warning(f"Remnawave provisioning failed for user {user.telegram_id}: {e}")
 
     await session.commit()
     await session.refresh(user)

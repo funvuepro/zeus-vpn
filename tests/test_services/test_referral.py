@@ -1,4 +1,6 @@
 from decimal import Decimal
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 from bot.database.models import Payment, PaymentProvider, PaymentStatus, User
 from bot.services.referral import grant_referral_bonus, get_referral_registered_count, get_referral_paid_count
@@ -74,3 +76,34 @@ async def test_grant_referral_bonus_skips_non_first_payment(db_session):
 
     await db_session.refresh(referrer)
     assert referrer.balance == Decimal("0.00")  # this was the 2nd paid payment, not the 1st
+
+
+async def test_grant_referral_bonus_reactivates_disabled_referrer(db_session):
+    referrer = User(
+        telegram_id=606, username="referrer4", balance=Decimal("0.00"),
+        access_active=False, grace_started_at=datetime.now(timezone.utc),
+        remnawave_uuid="uuid-ref",
+    )
+    db_session.add(referrer)
+    await db_session.commit()
+
+    invited = User(telegram_id=607, username="invited4", referred_by=referrer.id, balance=Decimal("0.00"))
+    db_session.add(invited)
+    await db_session.commit()
+
+    payment = Payment(
+        user_id=invited.id, provider=PaymentProvider.yookassa,
+        amount=Decimal("150.00"), status=PaymentStatus.paid,
+    )
+    db_session.add(payment)
+    await db_session.commit()
+
+    with patch("bot.services.balance.remnawave") as mock_remnawave:
+        mock_remnawave.enable_user = AsyncMock()
+        await grant_referral_bonus(invited, db_session)
+        mock_remnawave.enable_user.assert_called_once_with("uuid-ref")
+
+    await db_session.refresh(referrer)
+    assert referrer.balance == REFERRAL_BONUS_RUB
+    assert referrer.access_active is True
+    assert referrer.grace_started_at is None

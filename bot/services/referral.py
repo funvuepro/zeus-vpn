@@ -47,7 +47,10 @@ async def grant_referral_bonus(user: User, session: AsyncSession) -> None:
     if referrer is None:
         return
 
+    from bot.services.balance import reactivate_access  # deferred: balance imports this module
+
     referrer.balance += REFERRAL_BONUS_RUB
+    await reactivate_access(referrer, session)
     user.referral_bonus_granted = True
     await session.commit()
     await notify_user(referrer.telegram_id, f"⚡ +{REFERRAL_BONUS_RUB} ₽ на баланс за приглашённого друга!")

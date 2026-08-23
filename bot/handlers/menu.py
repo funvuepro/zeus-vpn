@@ -23,8 +23,11 @@ async def connect_vpn_handler(callback: CallbackQuery, session: AsyncSession):
     user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
 
     if user and user.access_active:
+        from bot.handlers.devices import _ensure_remnawave_uuid
+
         sub_url = ""
         try:
+            await _ensure_remnawave_uuid(user, session)
             sub_url = await remnawave.get_subscription_url(f"user_{user.telegram_id}")
         except Exception:
             pass

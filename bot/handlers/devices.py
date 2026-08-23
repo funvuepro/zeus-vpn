@@ -29,19 +29,26 @@ def _fmt_dt(iso: str) -> str:
 
 
 async def _ensure_remnawave_uuid(user: User, session: AsyncSession) -> str | None:
-    """If remnawave_uuid is missing but user has an active subscription, fetch it from Remnawave."""
+    """If remnawave_uuid is missing, look up (or create, if provisioning never
+    succeeded — e.g. Remnawave was unreachable at registration time) the
+    Remnawave user and persist its id."""
     if user.remnawave_uuid:
         return user.remnawave_uuid
+    username = f"user_{user.telegram_id}"
+    from bot.handlers.about import REMNAWAVE_EXPIRE_DAYS
     try:
-        username = f"user_{user.telegram_id}"
         data = await remnawave.get_user_by_username(username)
-        uuid = data.get("uuid")
-        if uuid:
-            user.remnawave_uuid = uuid
-            await session.commit()
-        return uuid
+        remnawave_id = data.get("id")
     except Exception:
-        return None
+        try:
+            _, remnawave_id = await remnawave.create_user(username, expire_days=REMNAWAVE_EXPIRE_DAYS)
+        except Exception:
+            return None
+    if remnawave_id:
+        user.remnawave_uuid = str(remnawave_id)
+        await session.commit()
+        return user.remnawave_uuid
+    return None
 
 
 def _no_sub_keyboard() -> InlineKeyboardMarkup:

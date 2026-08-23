@@ -16,7 +16,7 @@ async def test_create_user_returns_url_and_uuid(client):
     mock_resp = MagicMock()
     mock_resp.json.return_value = {
         "response": {
-            "uuid": "aaaa-bbbb-cccc",
+            "id": 42,
             "subscriptionUrl": "https://test.example.com/sub/xyz",
         }
     }
@@ -24,7 +24,7 @@ async def test_create_user_returns_url_and_uuid(client):
 
     url, uuid = await client.create_user("user_123", expire_days=30)
     assert url == "https://test.example.com/sub/xyz"
-    assert uuid == "aaaa-bbbb-cccc"
+    assert uuid == "42"
     call = client._request.call_args
     assert call.args[0] == "POST"
     assert call.args[1] == "/users"

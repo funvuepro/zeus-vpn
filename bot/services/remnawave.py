@@ -6,9 +6,10 @@ import httpx
 
 
 class RemnaWaveClient:
-    def __init__(self, base_url: str, api_token: str):
+    def __init__(self, base_url: str, api_token: str, default_squad_uuid: str = ""):
         self._base_url = base_url.rstrip("/")
         self._api_token = api_token
+        self._default_squad_uuid = default_squad_uuid
         self._http: httpx.AsyncClient | None = None
         self._lock: asyncio.Lock | None = None
 
@@ -49,7 +50,12 @@ class RemnaWaveClient:
         )
 
     async def create_user(self, username: str, expire_days: int) -> Tuple[str, str]:
-        """Create VPN user. Returns (subscription_url, remnawave_uuid)."""
+        """Create VPN user. Returns (subscription_url, remnawave_id).
+
+        Remnawave's user objects carry no "uuid" field — actions/deletion
+        endpoints key off the numeric "id" instead, so that's what gets
+        stored (as a string) in User.remnawave_uuid despite the column name.
+        """
         payload: dict = {
             "username": username,
             "expireAt": self._expire_iso(expire_days),
@@ -58,9 +64,11 @@ class RemnaWaveClient:
         }
         if username.startswith("user_") and username[5:].isdigit():
             payload["telegramId"] = int(username[5:])
+        if self._default_squad_uuid:
+            payload["activeInternalSquads"] = [self._default_squad_uuid]
         resp = await self._request("POST", "/users", json=payload)
         data = resp.json()["response"]
-        return data["subscriptionUrl"], data["uuid"]
+        return data["subscriptionUrl"], str(data["id"])
 
     async def extend_user(self, username: str, expire_at: datetime) -> None:
         """Set user expiry to an absolute datetime."""
@@ -108,6 +116,7 @@ class _LazyRemnaWaveProxy:
             self._instance = RemnaWaveClient(
                 base_url=s.REMNAWAVE_URL,
                 api_token=s.REMNAWAVE_API_TOKEN,
+                default_squad_uuid=s.REMNAWAVE_DEFAULT_SQUAD_UUID,
             )
         return self._instance
 

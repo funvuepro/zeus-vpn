@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     REMNAWAVE_URL: str
     REMNAWAVE_API_TOKEN: str
+    REMNAWAVE_DEFAULT_SQUAD_UUID: str = ""
     SUBSCRIPTION_HOST: str = ""
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""

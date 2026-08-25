@@ -13,7 +13,6 @@ def main_menu_keyboard(has_access: bool = True) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚡️ Подключить VPN", callback_data="connect_vpn", style=S)],
         [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="topup", style=P)],
         [InlineKeyboardButton(text="📱 Мои устройства", callback_data="my_devices")],
-        [InlineKeyboardButton(text="🔢 Число устройств", callback_data="change_devices")],
         [InlineKeyboardButton(text="📖 Инструкция", callback_data="instruction")],
         [InlineKeyboardButton(text="👥 Пригласить друзей", callback_data="referrals")],
         [InlineKeyboardButton(text="ℹ️ О сервисе", callback_data="about")],
@@ -104,5 +103,5 @@ def devices_count_keyboard(current: int) -> InlineKeyboardMarkup:
     for n in DEVICE_OPTIONS:
         mark = "✅ " if n == current else ""
         buttons.append([InlineKeyboardButton(text=f"{mark}{n} устр", callback_data=f"set_devices:{n}")])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="my_devices")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

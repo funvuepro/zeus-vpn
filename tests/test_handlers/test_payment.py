@@ -45,11 +45,11 @@ async def test_set_devices_rejects_values_outside_allowed_options(db_session, pa
 
 
 async def test_set_devices_accepts_allowed_option(db_session):
-    user = User(telegram_id=901, username="devs2", devices_limit=1)
+    user = User(telegram_id=901, username="devs2", devices_limit=1, remnawave_uuid="42")
     db_session.add(user)
     await db_session.commit()
 
-    with patch("bot.handlers.payment.smart_edit", new=AsyncMock()):
+    with patch("bot.handlers.devices.smart_edit", new=AsyncMock()):
         await set_devices(_devices_callback(901, "set_devices:4"), db_session)
 
     await db_session.refresh(user)

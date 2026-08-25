@@ -13,7 +13,6 @@ from bot.keyboards.inline import (
     DEVICE_OPTIONS,
     back_to_menu_keyboard,
     devices_count_keyboard,
-    main_menu_keyboard,
     payment_formed_keyboard,
     topup_amount_prompt_keyboard,
 )
@@ -110,8 +109,6 @@ async def set_devices(callback: CallbackQuery, session: AsyncSession):
         return
     user.devices_limit = new_limit
     await session.commit()
-    await smart_edit(
-        callback,
-        f"✅ Число устройств обновлено: <b>{new_limit}</b>",
-        main_menu_keyboard(has_access=user.access_active),
-    )
+
+    from bot.handlers.devices import my_devices
+    await my_devices(callback, session)

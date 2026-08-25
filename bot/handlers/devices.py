@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User
+from bot.services.balance import calculate_daily_charge, get_daily_rate_per_device
 from bot.services.remnawave import remnawave
 from bot.utils import smart_edit
 
@@ -79,6 +80,7 @@ def _devices_main_keyboard(devices: list) -> InlineKeyboardMarkup:
             callback_data=f"device:{hwid}",
         )])
     buttons.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices")])
+    buttons.append([InlineKeyboardButton(text="🔢 Изменить лимит устройств", callback_data="change_devices")])
     buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices")])
     buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -135,6 +137,12 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
 
     count = len(devices)
     limit = user.devices_limit
+    rate = await get_daily_rate_per_device(session)
+    daily_charge = calculate_daily_charge(rate, limit)
+    charge_info = (
+        f"💳 Лимит <b>{limit}</b> устр. → списание <b>{daily_charge} ₽/день</b>\n"
+        f"<i>Чем больше лимит — тем выше суточное списание.</i>"
+    )
 
     if not devices:
         # No devices yet — show subscription link to get started
@@ -147,7 +155,8 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
         text = (
             f"📱 <b>МОИ УСТРОЙСТВА</b>\n"
             f"{'─' * 22}\n"
-            f"Подключено: <b>0</b> из <b>{limit}</b>\n\n"
+            f"Подключено: <b>0</b> из <b>{limit}</b>\n"
+            f"{charge_info}\n\n"
             f"📡 Устройства ещё не подключены.\n\n"
             f"Чтобы подключиться — скопируй ссылку подписки\n"
             f"из раздела <b>⚡️ Подключить VPN</b> и добавь в\n"
@@ -156,6 +165,7 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⚡️ Подключить VPN", callback_data="connect_vpn")],
             [InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices")],
+            [InlineKeyboardButton(text="🔢 Изменить лимит устройств", callback_data="change_devices")],
             [InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ])
@@ -165,7 +175,8 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
     text = (
         f"📱 <b>МОИ УСТРОЙСТВА</b>\n"
         f"{'─' * 22}\n"
-        f"Подключено: <b>{count}</b> из <b>{limit}</b>\n\n"
+        f"Подключено: <b>{count}</b> из <b>{limit}</b>\n"
+        f"{charge_info}\n\n"
         f"<i>Нажмите на устройство для подробностей\n"
         f"или чтобы отвязать его.</i>"
     )

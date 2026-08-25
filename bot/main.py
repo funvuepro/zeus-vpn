@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.config import get_settings
 from bot.database.session import AsyncSessionLocal
-from bot.handlers import about, admin, devices, fallback, instruction, menu, payment, promo, referral, start
+from bot.handlers import about, admin, devices, fallback, menu, payment, promo, referral, start
 
 logging.basicConfig(level=logging.INFO)
 
@@ -138,7 +138,6 @@ async def main():
     dp.include_router(about.router)
     dp.include_router(admin.router)
     dp.include_router(start.router)
-    dp.include_router(instruction.router)
     dp.include_router(menu.router)
     dp.include_router(devices.router)
     dp.include_router(payment.router)

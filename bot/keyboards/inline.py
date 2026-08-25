@@ -13,7 +13,6 @@ def main_menu_keyboard(has_access: bool = True) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⚡️ Подключить VPN", callback_data="connect_vpn", style=S)],
         [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="topup", style=P)],
         [InlineKeyboardButton(text="📱 Мои устройства", callback_data="my_devices")],
-        [InlineKeyboardButton(text="📖 Инструкция", callback_data="instruction")],
         [InlineKeyboardButton(text="👥 Пригласить друзей", callback_data="referrals")],
         [InlineKeyboardButton(text="ℹ️ О сервисе", callback_data="about")],
         [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")],

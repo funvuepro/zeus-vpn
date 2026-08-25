@@ -47,10 +47,18 @@ def build_menu_text(user: User) -> str:
             f"💰 Баланс: <b>{user.balance} ₽</b>"
         )
 
+    instruction = (
+        "📖 <b>Как подключиться:</b>\n"
+        "1️⃣ Купи подписку\n"
+        "2️⃣ Нажми «⚡️ Подключить VPN» → скопируй ссылку → добавь в Hiddify / v2rayNG / Happ\n"
+        "3️⃣ Включи VPN в приложении"
+    )
+
     return (
         f"⚡️ <b>Zeus VPN</b>\n\n"
         f"🆔 ID: <code>{user.telegram_id}</code>\n\n"
         f"{status_lines}\n\n"
+        f"{instruction}\n\n"
         f"Выберите раздел:"
     )
 

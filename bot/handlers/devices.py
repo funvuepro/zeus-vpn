@@ -1,5 +1,4 @@
 from aiogram import Router, F
-from aiogram.enums import ButtonStyle
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,10 +8,6 @@ from bot.services.remnawave import remnawave
 from bot.utils import smart_edit
 
 router = Router()
-
-S = ButtonStyle.SUCCESS
-P = ButtonStyle.PRIMARY
-D = ButtonStyle.DANGER
 
 _PLATFORMS = {"iOS": "📱", "Android": "🤖", "Windows": "🖥", "macOS": "🍎", "Linux": "🐧"}
 
@@ -58,8 +53,8 @@ async def _ensure_remnawave_uuid(user: User, session: AsyncSession) -> str | Non
 
 def _no_sub_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="topup", style=P)],
-        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu", style=P)],
+        [InlineKeyboardButton(text="💰 Пополнить баланс", callback_data="topup")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
     ])
 
 
@@ -82,18 +77,17 @@ def _devices_main_keyboard(devices: list) -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(
             text=f"{i}. {label}",
             callback_data=f"device:{hwid}",
-            style=P,
         )])
-    buttons.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices", style=S)])
-    buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices", style=P)])
-    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu", style=P)])
+    buttons.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices")])
+    buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def _device_detail_keyboard(hwid: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🚫 Отвязать устройство", callback_data=f"unbind:{hwid}", style=D)],
-        [InlineKeyboardButton(text="◀️ К списку", callback_data="my_devices", style=P)],
+        [InlineKeyboardButton(text="🚫 Отвязать устройство", callback_data=f"unbind:{hwid}")],
+        [InlineKeyboardButton(text="◀️ К списку", callback_data="my_devices")],
     ])
 
 
@@ -125,8 +119,8 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
             "⚠️ Не удалось получить данные VPN-аккаунта.\n"
             "Обратитесь в поддержку.",
             InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support", style=P)],
-                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu", style=P)],
+                [InlineKeyboardButton(text="🆘 Поддержка", callback_data="support")],
+                [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
             ]),
         )
         return
@@ -160,10 +154,10 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
             f"Hiddify, v2rayNG или другой клиент."
         )
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⚡️ Подключить VPN", callback_data="connect_vpn", style=S)],
-            [InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices", style=P)],
-            [InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices", style=P)],
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu", style=P)],
+            [InlineKeyboardButton(text="⚡️ Подключить VPN", callback_data="connect_vpn")],
+            [InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices")],
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ])
         await smart_edit(callback, text, keyboard)
         return

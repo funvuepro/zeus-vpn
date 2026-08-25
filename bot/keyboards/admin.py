@@ -38,17 +38,12 @@ def admin_users_keyboard(users: list, page: int, total: int, page_size: int = 10
         [InlineKeyboardButton(text=f"#{u.telegram_id} @{u.username or '—'}", callback_data=f"adm_user:{u.id}")]
         for u in users
     ]
-    nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton(text="◀️", callback_data=f"adm_users:{page - 1}"))
+        buttons.append([InlineKeyboardButton(text="◀️ Пред. страница", callback_data=f"adm_users:{page - 1}")])
     if (page + 1) * page_size < total:
-        nav.append(InlineKeyboardButton(text="▶️", callback_data=f"adm_users:{page + 1}"))
-    if nav:
-        buttons.append(nav)
-    buttons.append([
-        InlineKeyboardButton(text="🔍 Поиск по ID", callback_data="adm_search_user"),
-        InlineKeyboardButton(text="◀️ Меню", callback_data="adm_menu"),
-    ])
+        buttons.append([InlineKeyboardButton(text="▶️ След. страница", callback_data=f"adm_users:{page + 1}")])
+    buttons.append([InlineKeyboardButton(text="🔍 Поиск по ID", callback_data="adm_search_user")])
+    buttons.append([InlineKeyboardButton(text="◀️ Меню", callback_data="adm_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -95,13 +90,11 @@ def admin_servers_keyboard(servers: list) -> InlineKeyboardMarkup:
     for s in servers:
         status = "✅" if s.is_active else "⛔️"
         backup = " [резерв]" if s.is_backup else ""
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"{status} {s.name} — {s.ip}:{s.port}{backup}",
-                callback_data=f"adm_srv_toggle:{s.id}",
-            ),
-            InlineKeyboardButton(text="🗑", callback_data=f"adm_srv_del:{s.id}"),
-        ])
+        buttons.append([InlineKeyboardButton(
+            text=f"{status} {s.name} — {s.ip}:{s.port}{backup}",
+            callback_data=f"adm_srv_toggle:{s.id}",
+        )])
+        buttons.append([InlineKeyboardButton(text=f"🗑 Удалить {s.name}", callback_data=f"adm_srv_del:{s.id}")])
     buttons.append([InlineKeyboardButton(text="➕ Добавить сервер", callback_data="adm_srv_add")])
     buttons.append([InlineKeyboardButton(text="◀️ Меню", callback_data="adm_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)

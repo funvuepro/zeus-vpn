@@ -79,8 +79,8 @@ def _devices_main_keyboard(devices: list) -> InlineKeyboardMarkup:
             callback_data=f"device:{hwid}",
         )])
     buttons.append([InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices")])
-    buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices"),
-                    InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
+    buttons.append([InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -156,8 +156,8 @@ async def my_devices(callback: CallbackQuery, session: AsyncSession):
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="⚡️ Подключить VPN", callback_data="connect_vpn")],
             [InlineKeyboardButton(text="➕ Добавить устройство", callback_data="add_devices")],
-            [InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices"),
-             InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="🔄 Обновить", callback_data="my_devices")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
         ])
         await smart_edit(callback, text, keyboard)
         return

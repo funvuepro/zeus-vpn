@@ -74,7 +74,7 @@ async def back_to_menu(callback: CallbackQuery, session: AsyncSession):
     await send_section(
         callback,
         "main",
-        build_menu_text(user),
+        await build_menu_text(user, session),
         main_menu_keyboard(has_access=user.access_active),
     )
 

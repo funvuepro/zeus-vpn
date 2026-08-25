@@ -121,7 +121,7 @@ async def accept_terms_handler(callback: CallbackQuery, session: AsyncSession):
     await session.commit()
     await session.refresh(user)
 
-    await send_section(callback, "main", build_menu_text(user), main_menu_keyboard(has_access=user.access_active))
+    await send_section(callback, "main", await build_menu_text(user, session), main_menu_keyboard(has_access=user.access_active))
 
 
 @router.callback_query(F.data == "about")

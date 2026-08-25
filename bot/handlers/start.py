@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User
 from bot.keyboards.inline import main_menu_keyboard, terms_accept_keyboard
+from bot.services.balance import calculate_daily_charge, get_daily_rate_per_device
 from bot.utils import get_section_photo
 
 router = Router()
@@ -34,17 +35,26 @@ def _days_word(n: int) -> str:
     return "дней"
 
 
-def build_menu_text(user: User) -> str:
+async def build_menu_text(user: User, session: AsyncSession) -> str:
+    rate = await get_daily_rate_per_device(session)
+    daily_charge = calculate_daily_charge(rate, user.devices_limit)
+    tariff = (
+        f"🏷 Ваш тариф: <b>{user.devices_limit} устр.</b> — <b>{daily_charge} ₽/день</b>\n"
+        f"<i>Больше устройств — выше суточное списание.</i>"
+    )
+
     if user.access_active:
         status_lines = (
             f"✅ Доступ: <b>Активен</b>\n"
             f"💰 Баланс: <b>{user.balance} ₽</b>\n"
-            f"📱 Устройств: {user.devices_limit}"
+            f"📱 Устройств: {user.devices_limit}\n"
+            f"{tariff}"
         )
     else:
         status_lines = (
             f"❌ Доступ: <b>Отключён</b> (баланс исчерпан)\n"
-            f"💰 Баланс: <b>{user.balance} ₽</b>"
+            f"💰 Баланс: <b>{user.balance} ₽</b>\n"
+            f"{tariff}"
         )
 
     instruction = (
@@ -110,7 +120,7 @@ async def start_handler(message: Message, session: AsyncSession, command):
         )
         return
 
-    text = build_menu_text(user)
+    text = await build_menu_text(user, session)
     keyboard = main_menu_keyboard(has_access=user.access_active)
 
     # One message: photo + caption + keyboard

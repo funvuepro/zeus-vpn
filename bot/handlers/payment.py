@@ -15,6 +15,7 @@ from bot.keyboards.inline import (
     devices_count_keyboard,
     payment_formed_keyboard,
     topup_amount_prompt_keyboard,
+    topup_menu_keyboard,
 )
 from bot.services.yookassa import create_payment
 from bot.utils import smart_edit
@@ -35,18 +36,74 @@ def _validate_topup_amount(amount: float, min_amount: float) -> tuple[bool, str 
     return True, None
 
 
+async def _start_payment(user: User, amount: float, session: AsyncSession) -> tuple[str | None, str | None]:
+    """Create a pending Payment row and a YooKassa confirmation link.
+
+    Returns (pay_url, error). On failure (missing credentials, YooKassa
+    down) rolls back the pending row so it doesn't linger unpaid forever.
+    """
+    payment = Payment(user_id=user.id, provider=PaymentProvider.yookassa, amount=Decimal(str(amount)))
+    session.add(payment)
+    await session.flush()
+    await session.commit()
+
+    try:
+        pay_url = await create_payment(amount, payment.id, "Пополнение баланса Zeus VPN")
+    except Exception:
+        await session.delete(payment)
+        await session.commit()
+        return None, PROVIDER_UNAVAILABLE_MESSAGE
+
+    return pay_url, None
+
+
 @router.callback_query(F.data == "topup")
-async def topup_start(callback: CallbackQuery, state: FSMContext):
+async def topup_start(callback: CallbackQuery):
     await callback.answer()
     s = get_settings()
-    if not s.YOOKASSA_SHOP_ID or not s.YOOKASSA_SECRET_KEY:
-        await smart_edit(callback, PROVIDER_UNAVAILABLE_MESSAGE, back_to_menu_keyboard())
-        return
+    await smart_edit(
+        callback,
+        f"💰 <b>ПОПОЛНЕНИЕ БАЛАНСА</b>\n\nВыберите сумму или введите свою (минимум {s.MIN_TOPUP_RUB:.0f} ₽):",
+        topup_menu_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "topup_custom")
+async def topup_custom_prompt(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    s = get_settings()
     await state.set_state(PaymentStates.waiting_for_amount)
     await smart_edit(
         callback,
         f"💰 <b>ПОПОЛНЕНИЕ БАЛАНСА</b>\n\nВведите сумму (минимум {s.MIN_TOPUP_RUB:.0f} ₽):",
         topup_amount_prompt_keyboard(),
+    )
+
+
+@router.callback_query(F.data.startswith("topup_amount:"))
+async def topup_preset(callback: CallbackQuery, session: AsyncSession):
+    await callback.answer()
+    s = get_settings()
+    try:
+        amount = float(callback.data.split(":")[1])
+    except (IndexError, ValueError):
+        return
+
+    ok, error = _validate_topup_amount(amount, s.MIN_TOPUP_RUB)
+    if not ok:
+        await smart_edit(callback, error, topup_menu_keyboard())
+        return
+
+    user = await session.scalar(select(User).where(User.telegram_id == callback.from_user.id))
+    pay_url, error = await _start_payment(user, amount, session)
+    if error:
+        await smart_edit(callback, error, back_to_menu_keyboard())
+        return
+
+    await smart_edit(
+        callback,
+        f"💰 <b>ПЛАТЁЖ СФОРМИРОВАН</b>\n\n└ 💲 Сумма: {amount:.0f} ₽\n\nНажмите кнопку ниже для оплаты.",
+        payment_formed_keyboard(pay_url),
     )
 
 
@@ -67,13 +124,10 @@ async def topup_amount_input(message: Message, session: AsyncSession, state: FSM
         return
 
     user = await session.scalar(select(User).where(User.telegram_id == message.from_user.id))
-
-    payment = Payment(user_id=user.id, provider=PaymentProvider.yookassa, amount=Decimal(str(amount)))
-    session.add(payment)
-    await session.flush()
-    await session.commit()
-
-    pay_url = await create_payment(amount, payment.id, "Пополнение баланса Zeus VPN")
+    pay_url, error = await _start_payment(user, amount, session)
+    if error:
+        await message.answer(error, reply_markup=back_to_menu_keyboard())
+        return
 
     await message.answer(
         f"💰 <b>ПЛАТЁЖ СФОРМИРОВАН</b>\n\n└ 💲 Сумма: {amount:.0f} ₽\n\nНажмите кнопку ниже для оплаты.",

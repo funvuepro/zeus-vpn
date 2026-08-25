@@ -6,6 +6,7 @@ P = ButtonStyle.PRIMARY
 D = ButtonStyle.DANGER
 
 DEVICE_OPTIONS = [1, 2, 3, 4, 5]
+TOPUP_PRESET_AMOUNTS = [100, 300, 500, 1000]
 
 
 def main_menu_keyboard(has_access: bool = True) -> InlineKeyboardMarkup:
@@ -82,6 +83,16 @@ def about_back_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="◀️ Назад", callback_data="about")],
     ])
+
+
+def topup_menu_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text=f"💳 {amount} ₽", callback_data=f"topup_amount:{amount}", style=P)]
+        for amount in TOPUP_PRESET_AMOUNTS
+    ]
+    buttons.append([InlineKeyboardButton(text="✏️ Своя сумма", callback_data="topup_custom", style=S)])
+    buttons.append([InlineKeyboardButton(text="◀️ В главное меню", callback_data="back_to_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def topup_amount_prompt_keyboard() -> InlineKeyboardMarkup:

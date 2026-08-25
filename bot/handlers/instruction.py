@@ -1,4 +1,5 @@
 from aiogram import Router, F
+from aiogram.enums import ButtonStyle
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 
 from bot.utils import smart_edit
@@ -29,6 +30,6 @@ async def show_instruction(callback: CallbackQuery):
         callback,
         _INSTRUCTION_TEXT,
         InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="back_to_menu", style=ButtonStyle.PRIMARY)],
         ]),
     )

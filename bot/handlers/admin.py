@@ -447,9 +447,11 @@ async def adm_srv_del(callback: CallbackQuery, session: AsyncSession):
 _ADD_SERVER_HELP = """\
 ➕ <b>Добавить сервер</b>
 
-Отправь данные сервера в формате (каждый параметр на новой строке):
+Первая строка — протокол: <code>vless</code> или <code>hysteria2</code>.
 
-<code>Название
+<b>VLESS+Reality</b> (каждый параметр на новой строке):
+<code>vless
+Название
 IP-адрес
 Порт
 Транспорт (tcp или grpc)
@@ -460,7 +462,8 @@ Fingerprint (firefox / chrome / qq)
 backup (да или нет)</code>
 
 <b>Пример:</b>
-<code>Москва-1
+<code>vless
+Москва-1
 89.208.209.184
 443
 tcp
@@ -468,7 +471,25 @@ dDChaMTPomqlPNYMC1x-c4e9nt5XV13eY_tTwdCgPUU
 b19883501ce9adae
 max.ru
 firefox
-нет</code>"""
+нет</code>
+
+<b>Hysteria2</b> (fallback-тир под глушилки):
+<code>hysteria2
+Название
+IP-адрес
+Порт
+Пароль (auth)
+ServerName (SNI масштарада)
+backup (да или нет)</code>
+
+<b>Пример:</b>
+<code>hysteria2
+Россия-3-HY2
+80.66.65.66
+10000
+4de2b47907fc2a34876a16918cd86795
+cdn.timer.dev-agent.ru
+да</code>"""
 
 
 @router.callback_query(F.data == "adm_srv_add")
@@ -482,28 +503,56 @@ async def adm_srv_add(callback: CallbackQuery, state: FSMContext):
 async def adm_srv_add_input(message: Message, session: AsyncSession, state: FSMContext):
     await state.clear()
     lines = [l.strip() for l in message.text.strip().splitlines() if l.strip()]
-    if len(lines) < 8:
-        await message.answer("❌ Нужно минимум 8 строк. Попробуй ещё раз через /admin → Серверы.")
+    if not lines:
+        await message.answer("❌ Пустой ввод. Попробуй ещё раз через /admin → Серверы.")
         return
+
+    protocol = lines[0].lower()
     try:
-        name, ip, port_str, transport, public_key, short_id, server_name, fingerprint = lines[:8]
-        is_backup = len(lines) > 8 and lines[8].lower() in ("да", "yes", "1", "backup")
-        server = VpnServer(
-            name=name,
-            ip=ip,
-            port=int(port_str),
-            transport=transport.lower(),
-            public_key=public_key,
-            short_id=short_id,
-            server_name=server_name,
-            fingerprint=fingerprint.lower(),
-            is_backup=is_backup,
-            is_active=True,
-        )
+        if protocol == "hysteria2":
+            if len(lines) < 6:
+                await message.answer("❌ Нужно минимум 6 строк для hysteria2. Попробуй ещё раз.")
+                return
+            _, name, ip, port_str, auth_password, server_name = lines[:6]
+            is_backup = len(lines) > 6 and lines[6].lower() in ("да", "yes", "1", "backup")
+            server = VpnServer(
+                name=name,
+                ip=ip,
+                port=int(port_str),
+                protocol="hysteria2",
+                fingerprint="firefox",
+                server_name=server_name,
+                auth_password=auth_password,
+                is_backup=is_backup,
+                is_active=True,
+            )
+        elif protocol == "vless":
+            if len(lines) < 9:
+                await message.answer("❌ Нужно минимум 9 строк для vless. Попробуй ещё раз.")
+                return
+            _, name, ip, port_str, transport, public_key, short_id, server_name, fingerprint = lines[:9]
+            is_backup = len(lines) > 9 and lines[9].lower() in ("да", "yes", "1", "backup")
+            server = VpnServer(
+                name=name,
+                ip=ip,
+                port=int(port_str),
+                protocol="vless",
+                transport=transport.lower(),
+                public_key=public_key,
+                short_id=short_id,
+                server_name=server_name,
+                fingerprint=fingerprint.lower(),
+                is_backup=is_backup,
+                is_active=True,
+            )
+        else:
+            await message.answer("❌ Первая строка должна быть 'vless' или 'hysteria2'.")
+            return
+
         session.add(server)
         await session.commit()
         await message.answer(
-            f"✅ Сервер <b>{name}</b> ({ip}:{port_str}) добавлен.",
+            f"✅ Сервер <b>{server.name}</b> ({server.ip}:{server.port}) добавлен.",
             parse_mode="HTML",
             reply_markup=admin_back_keyboard("adm_servers"),
         )

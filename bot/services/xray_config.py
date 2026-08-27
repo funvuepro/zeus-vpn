@@ -56,6 +56,28 @@ _INBOUNDS = [
 
 
 def _make_outbound(server: VpnServer, user_uuid: str, tag: str) -> dict:
+    if server.protocol == "hysteria2":
+        return {
+            "protocol": "hysteria2",
+            "settings": {
+                "servers": [{
+                    "address": server.ip,
+                    "port": server.port,
+                    "password": server.auth_password,
+                }]
+            },
+            "streamSettings": {
+                "network": "hysteria2",
+                "security": "tls",
+                "tlsSettings": {
+                    "allowInsecure": True,
+                    "fingerprint": server.fingerprint,
+                    "serverName": server.server_name,
+                },
+            },
+            "tag": tag,
+        }
+
     stream: dict = {"security": "reality"}
 
     reality_settings = {

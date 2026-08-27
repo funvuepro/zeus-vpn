@@ -6,9 +6,13 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
 
+from bot.config import get_settings
+
 router = APIRouter()
 
-_REMNAWAVE = "http://127.0.0.1:3000"
+
+def _remnawave_base() -> str:
+    return get_settings().REMNAWAVE_URL.rstrip("/")
 
 _RU_MONTHS = [
     "января", "февраля", "марта", "апреля", "мая", "июня",
@@ -510,7 +514,7 @@ async def subscription_proxy(token: str, request: Request):
     if "text/html" in accept:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{_REMNAWAVE}/api/sub/{token}",
+                f"{_remnawave_base()}/api/sub/{token}",
                 headers=_proxy_headers(request),
             )
         if resp.status_code == 200:
@@ -541,7 +545,7 @@ async def subscription_proxy(token: str, request: Request):
     # VPN client: forward raw config
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            f"{_REMNAWAVE}/api/sub/{token}",
+            f"{_remnawave_base()}/api/sub/{token}",
             headers=_proxy_headers(request),
             params=dict(request.query_params),
         )
@@ -569,7 +573,7 @@ async def xray_config(token: str, request: Request):
     # Validate token via Remnawave and get user UUID
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            f"{_REMNAWAVE}/api/sub/{token}",
+            f"{_remnawave_base()}/api/sub/{token}",
             headers=_proxy_headers(request),
         )
 
@@ -624,7 +628,7 @@ async def remnawave_proxy(path: str, request: Request):
 
     async with httpx.AsyncClient() as client:
         resp = await client.get(
-            f"{_REMNAWAVE}/{path}",
+            f"{_remnawave_base()}/{path}",
             headers=_proxy_headers(request),
             params=dict(request.query_params),
         )

@@ -570,11 +570,13 @@ async def xray_config(token: str, request: Request):
     from bot.database.models import VpnServer
     from bot.services.xray_config import build_xray_config
 
-    # Validate token via Remnawave and get user UUID
+    # Validate token via Remnawave. The JSON metadata form (isFound/user/links) is only
+    # returned for an "Accept: text/html" request -- anything else gets the raw base64
+    # subscription body instead, regardless of what the real client sent.
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{_remnawave_base()}/api/sub/{token}",
-            headers=_proxy_headers(request),
+            headers={"Accept": "text/html"},
         )
 
     if resp.status_code != 200:
@@ -584,7 +586,15 @@ async def xray_config(token: str, request: Request):
         data = resp.json()
         if not data.get("isFound"):
             return JSONResponse({"error": "subscription not found"}, status_code=404)
-        user_uuid = data.get("user", {}).get("uuid") or data.get("user", {}).get("shortUuid")
+        # The user object has no vless client id (shortUuid is the subscription token
+        # itself) -- pull the real uuid out of the first vless:// link instead.
+        import re
+        user_uuid = None
+        for link in data.get("links", []):
+            m = re.match(r"vless://([0-9a-f-]{36})@", link)
+            if m:
+                user_uuid = m.group(1)
+                break
         if not user_uuid:
             return JSONResponse({"error": "user uuid not found"}, status_code=404)
     except Exception:

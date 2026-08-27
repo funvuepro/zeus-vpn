@@ -57,20 +57,28 @@ _INBOUNDS = [
 
 def _make_outbound(server: VpnServer, user_uuid: str, tag: str) -> dict:
     if server.protocol == "hysteria2":
+        # Not a real Xray-core transport -- this dialect ("protocol": "hysteria",
+        # version 2) is only understood by Happ's bundled client, which parses it
+        # itself and runs a separate Hysteria2 process for these legs. Plain
+        # xray-core rejects "hysteria2"/"hysteria" as an unknown transport, so this
+        # outbound can only be exercised end-to-end through Happ, not `xray run`.
         return {
-            "protocol": "hysteria2",
+            "protocol": "hysteria",
             "settings": {
-                "servers": [{
-                    "address": server.ip,
-                    "port": server.port,
-                    "password": server.auth_password,
-                }]
+                "address": server.ip,
+                "port": server.port,
+                "version": 2,
             },
             "streamSettings": {
-                "network": "hysteria2",
+                "network": "hysteria",
                 "security": "tls",
+                "hysteriaSettings": {
+                    "auth": server.auth_password,
+                    "version": 2,
+                },
                 "tlsSettings": {
-                    "allowInsecure": True,
+                    "alpn": ["h3"],
+                    "enableSessionResumption": False,
                     "fingerprint": server.fingerprint,
                     "serverName": server.server_name,
                 },

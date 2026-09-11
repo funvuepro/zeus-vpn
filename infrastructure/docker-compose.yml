@@ -7,6 +7,8 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U zeusvpn"]
@@ -22,9 +24,15 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+    # Host networking, not the default bridge: Timeweb blocks Telegram's IPv4
+    # ranges, but IPv6 works fine from the host. Docker's bridge network doesn't
+    # pass IPv6 through to containers (EnableIPv6 defaults to false), so a
+    # bridged bot container only ever gets NAT'd IPv4 and can't reach
+    # api.telegram.org at all. Host mode gives it the host's real IPv6 route.
+    network_mode: host
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
-      DATABASE_URL: postgresql+asyncpg://zeusvpn:${DB_PASSWORD}@postgres:5432/zeusvpn
+      DATABASE_URL: postgresql+asyncpg://zeusvpn:${DB_PASSWORD}@127.0.0.1:5432/zeusvpn
       REMNAWAVE_URL: ${REMNAWAVE_URL}
       REMNAWAVE_API_TOKEN: ${REMNAWAVE_API_TOKEN}
       SUBSCRIPTION_HOST: ${SUBSCRIPTION_HOST:-}
@@ -42,8 +50,6 @@ services:
     volumes:
       # TLS material for the webhook server; adjust or drop if terminating TLS upstream.
       - ./certs:/certs:ro
-    ports:
-      - "8443:8443"
     depends_on:
       postgres:
         condition: service_healthy

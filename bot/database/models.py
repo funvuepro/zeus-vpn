@@ -113,5 +113,7 @@ class VpnServer(Base):
     service_name = Column(String, nullable=True)
     auth_password = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
-    is_backup = Column(Boolean, nullable=False, default=False, server_default="false")
+    # msk: plain Reality/TCP (first tier) -- lte: Reality/TCP+gRPC (harder to fingerprint,
+    # falls back to when MSK is down) -- llp: Hysteria2/QUIC (last resort under heavy DPI)
+    tier = Column(String, nullable=False, default="msk", server_default="msk")
     created_at = Column(DateTime(timezone=True), server_default=func.now())

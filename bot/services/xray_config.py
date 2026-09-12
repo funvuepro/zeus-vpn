@@ -98,7 +98,9 @@ def _make_outbound(server: VpnServer, user_uuid: str, tag: str) -> dict:
     if server.transport == "grpc":
         stream["network"] = "grpc"
         stream["grpcSettings"] = {
-            "authority": "",
+            # Matches serverName (the Reality decoy domain) so the :authority
+            # header doesn't stick out against the masqueraded TLS handshake.
+            "authority": server.server_name or "",
             "mode": False,
             "serviceName": server.service_name or "grpc",
         }
@@ -124,28 +126,47 @@ def _make_outbound(server: VpnServer, user_uuid: str, tag: str) -> dict:
     }
 
 
+_TIERS = ("msk", "lte", "llp")
+
+# Cascade order: msk falls back to lte, lte falls back to llp, llp is last resort.
+# A tier's fallback is reached via a "loopback" outbound that re-injects the
+# connection into routing tagged as coming from a virtual inbound (LTE-REROUTE /
+# LLP-REROUTE); a routing rule then hands that re-injected traffic to the next
+# tier's balancer. This indirection is what lets one balancer's fallbackTag
+# effectively point at *another balancer* instead of only a plain outbound.
+_LOOPBACK_TAG = {"lte": "LOOP-LTE", "llp": "LOOP-LLP"}
+_REROUTE_INBOUND_TAG = {"lte": "LTE-REROUTE", "llp": "LLP-REROUTE"}
+_BALANCER_TAG = {tier: f"{tier}_balancer" for tier in _TIERS}
+
+
 def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Zeus VPN") -> dict:
-    primary = [s for s in servers if not s.is_backup]
-    backup = [s for s in servers if s.is_backup]
-
+    tier_tags: dict[str, list[str]] = {tier: [] for tier in _TIERS}
     outbounds = []
-    primary_tags = []
-    backup_tags = []
 
-    for i, server in enumerate(primary):
-        tag = "proxy" if i == 0 else f"proxy-{i}"
-        outbounds.append(_make_outbound(server, user_uuid, tag))
-        primary_tags.append(tag)
-
-    for i, server in enumerate(backup):
-        tag = f"backup-{i}"
-        outbounds.append(_make_outbound(server, user_uuid, tag))
-        backup_tags.append(tag)
+    for tier in _TIERS:
+        tier_servers = [s for s in servers if s.tier == tier]
+        for i, server in enumerate(tier_servers):
+            tag = f"{tier.upper()}-{i}"
+            outbounds.append(_make_outbound(server, user_uuid, tag))
+            tier_tags[tier].append(tag)
 
     outbounds += [
         {"protocol": "freedom", "tag": "direct"},
         {"protocol": "blackhole", "tag": "block"},
     ]
+    for tier in ("lte", "llp"):
+        if tier_tags[tier]:
+            outbounds.append({
+                "protocol": "loopback",
+                "settings": {"inboundTag": _REROUTE_INBOUND_TAG[tier]},
+                "tag": _LOOPBACK_TAG[tier],
+            })
+
+    # The next present tier after `tier`, used both as a balancer's fallbackTag
+    # target and to decide which tier the catch-all routing rule should enter at.
+    def _next_tier(tier: str) -> str | None:
+        remaining = _TIERS[_TIERS.index(tier) + 1:]
+        return next((t for t in remaining if tier_tags[t]), None)
 
     balancers = []
     routing_rules = [
@@ -153,21 +174,30 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         {"domain": _RU_BYPASS_DOMAINS, "outboundTag": "direct", "type": "field"},
     ]
 
-    if primary_tags:
-        balancers.append({
-            "tag": "main_balancer",
-            "selector": primary_tags,
-            "strategy": {"type": "leastPing"},
-            **({"fallbackTag": "backup_balancer"} if backup_tags else {}),
-        })
-        routing_rules.append({"balancerTag": "main_balancer", "type": "field", "network": "tcp,udp"})
+    # Loopback re-entry rules must be evaluated before the catch-all entry rule
+    # below, since they match traffic that has already been routed once.
+    for tier in ("lte", "llp"):
+        if tier_tags[tier]:
+            routing_rules.append({
+                "type": "field",
+                "inboundTag": [_REROUTE_INBOUND_TAG[tier]],
+                "balancerTag": _BALANCER_TAG[tier],
+            })
 
-    if backup_tags:
+    for tier in _TIERS:
+        if not tier_tags[tier]:
+            continue
+        fallback = _next_tier(tier)
         balancers.append({
-            "tag": "backup_balancer",
-            "selector": backup_tags,
+            "tag": _BALANCER_TAG[tier],
+            "selector": tier_tags[tier],
             "strategy": {"type": "leastPing"},
+            **({"fallbackTag": _LOOPBACK_TAG[fallback]} if fallback else {}),
         })
+
+    entry_tier = next((t for t in _TIERS if tier_tags[t]), None)
+    if entry_tier:
+        routing_rules.append({"balancerTag": _BALANCER_TAG[entry_tier], "type": "field", "network": "tcp,udp"})
 
     config: dict = {
         "remarks": f"🇷🇺 {title} — Автовыбор",
@@ -192,7 +222,8 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         },
     }
 
-    if len(primary_tags) > 1 or backup_tags:
+    all_proxy_tags = [tag for tier in _TIERS for tag in tier_tags[tier]]
+    if len(all_proxy_tags) > 1:
         config["burstObservatory"] = {
             "pingConfig": {
                 "connectivity": "http://connectivitycheck.platform.hicloud.com/generate_204",
@@ -201,7 +232,7 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
                 "sampling": 3,
                 "timeout": "5s",
             },
-            "subjectSelector": ["proxy"],
+            "subjectSelector": [tier.upper() for tier in _TIERS if tier_tags[tier]],
         }
 
     return config

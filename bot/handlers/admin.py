@@ -402,9 +402,9 @@ async def adm_servers(callback: CallbackQuery, session: AsyncSession):
     if not await _get_admin(session, callback.from_user.id):
         return
     servers = (await session.execute(
-        select(VpnServer).order_by(VpnServer.is_backup, VpnServer.id)
+        select(VpnServer).order_by(VpnServer.tier.desc(), VpnServer.id)
     )).scalars().all()
-    text = f"🖥 <b>Серверы Zeus VPN</b> ({len(servers)} шт.)\n\n✅ — активен  ⛔️ — отключён  [резерв] — резервный"
+    text = f"🖥 <b>Серверы Zeus VPN</b> ({len(servers)} шт.)\n\n✅ — активен  ⛔️ — отключён  [msk/lte/llp] — тир"
     await callback.message.edit_text(text, reply_markup=admin_servers_keyboard(servers), parse_mode="HTML")
 
 
@@ -419,7 +419,7 @@ async def adm_srv_toggle(callback: CallbackQuery, session: AsyncSession):
         server.is_active = not server.is_active
         await session.commit()
     servers = (await session.execute(
-        select(VpnServer).order_by(VpnServer.is_backup, VpnServer.id)
+        select(VpnServer).order_by(VpnServer.tier.desc(), VpnServer.id)
     )).scalars().all()
     await callback.message.edit_reply_markup(reply_markup=admin_servers_keyboard(servers))
 
@@ -435,7 +435,7 @@ async def adm_srv_del(callback: CallbackQuery, session: AsyncSession):
         await session.delete(server)
         await session.commit()
     servers = (await session.execute(
-        select(VpnServer).order_by(VpnServer.is_backup, VpnServer.id)
+        select(VpnServer).order_by(VpnServer.tier.desc(), VpnServer.id)
     )).scalars().all()
     await callback.message.edit_text(
         f"🖥 <b>Серверы Zeus VPN</b> ({len(servers)} шт.)",
@@ -459,7 +459,7 @@ PublicKey
 ShortId
 ServerName (SNI)
 Fingerprint (firefox / chrome / qq)
-backup (да или нет)</code>
+Тир (msk / lte / llp)</code>
 
 <b>Пример:</b>
 <code>vless
@@ -471,16 +471,16 @@ dDChaMTPomqlPNYMC1x-c4e9nt5XV13eY_tTwdCgPUU
 b19883501ce9adae
 max.ru
 firefox
-нет</code>
+msk</code>
 
-<b>Hysteria2</b> (fallback-тир под глушилки):
+<b>Hysteria2</b> (llp-тир под глушилки):
 <code>hysteria2
 Название
 IP-адрес
 Порт
 Пароль (auth)
 ServerName (SNI масштарада)
-backup (да или нет)</code>
+Тир (msk / lte / llp)</code>
 
 <b>Пример:</b>
 <code>hysteria2
@@ -489,7 +489,7 @@ backup (да или нет)</code>
 10000
 4de2b47907fc2a34876a16918cd86795
 cdn.timer.dev-agent.ru
-да</code>"""
+llp</code>"""
 
 
 @router.callback_query(F.data == "adm_srv_add")
@@ -514,7 +514,10 @@ async def adm_srv_add_input(message: Message, session: AsyncSession, state: FSMC
                 await message.answer("❌ Нужно минимум 6 строк для hysteria2. Попробуй ещё раз.")
                 return
             _, name, ip, port_str, auth_password, server_name = lines[:6]
-            is_backup = len(lines) > 6 and lines[6].lower() in ("да", "yes", "1", "backup")
+            tier = lines[6].lower() if len(lines) > 6 else "llp"
+            if tier not in ("msk", "lte", "llp"):
+                await message.answer("❌ Тир должен быть msk, lte или llp.")
+                return
             server = VpnServer(
                 name=name,
                 ip=ip,
@@ -523,7 +526,7 @@ async def adm_srv_add_input(message: Message, session: AsyncSession, state: FSMC
                 fingerprint="firefox",
                 server_name=server_name,
                 auth_password=auth_password,
-                is_backup=is_backup,
+                tier=tier,
                 is_active=True,
             )
         elif protocol == "vless":
@@ -531,7 +534,10 @@ async def adm_srv_add_input(message: Message, session: AsyncSession, state: FSMC
                 await message.answer("❌ Нужно минимум 9 строк для vless. Попробуй ещё раз.")
                 return
             _, name, ip, port_str, transport, public_key, short_id, server_name, fingerprint = lines[:9]
-            is_backup = len(lines) > 9 and lines[9].lower() in ("да", "yes", "1", "backup")
+            tier = lines[9].lower() if len(lines) > 9 else "msk"
+            if tier not in ("msk", "lte", "llp"):
+                await message.answer("❌ Тир должен быть msk, lte или llp.")
+                return
             server = VpnServer(
                 name=name,
                 ip=ip,
@@ -542,7 +548,7 @@ async def adm_srv_add_input(message: Message, session: AsyncSession, state: FSMC
                 short_id=short_id,
                 server_name=server_name,
                 fingerprint=fingerprint.lower(),
-                is_backup=is_backup,
+                tier=tier,
                 is_active=True,
             )
         else:

@@ -89,9 +89,8 @@ def admin_servers_keyboard(servers: list) -> InlineKeyboardMarkup:
     buttons = []
     for s in servers:
         status = "✅" if s.is_active else "⛔️"
-        backup = " [резерв]" if s.is_backup else ""
         buttons.append([InlineKeyboardButton(
-            text=f"{status} {s.name} — {s.ip}:{s.port}{backup}",
+            text=f"{status} {s.name} — {s.ip}:{s.port} [{s.tier}]",
             callback_data=f"adm_srv_toggle:{s.id}",
         )])
         buttons.append([InlineKeyboardButton(text=f"🗑 Удалить {s.name}", callback_data=f"adm_srv_del:{s.id}")])

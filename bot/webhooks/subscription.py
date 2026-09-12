@@ -604,7 +604,7 @@ async def xray_config(token: str, request: Request):
     from bot.database.session import AsyncSessionLocal
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(VpnServer).where(VpnServer.is_active == True).order_by(VpnServer.is_backup, VpnServer.id)
+            select(VpnServer).where(VpnServer.is_active == True).order_by(VpnServer.tier.desc(), VpnServer.id)
         )
         servers = result.scalars().all()
 

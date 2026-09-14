@@ -54,8 +54,10 @@ _META_DOMAINS = [
 ]
 _META_CIDRS = [
     "157.240.0.0/16", "31.13.24.0/21", "31.13.64.0/18",
-    "69.171.224.0/19", "179.60.192.0/22", "185.60.216.0/22",
-    "102.132.96.0/20",
+    "69.171.224.0/19", "69.63.176.0/20", "66.220.144.0/20",
+    "179.60.192.0/22", "185.60.216.0/22", "185.89.216.0/22",
+    "102.132.96.0/20", "103.4.96.0/22", "129.134.0.0/16",
+    "173.252.64.0/18", "204.15.20.0/22", "45.64.40.0/22", "74.119.76.0/22",
 ]
 
 _DNS_CONFIG = {
@@ -220,8 +222,15 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         {"domain": _RU_BYPASS_DOMAINS, "outboundTag": "direct", "type": "field"},
     ]
     if blocked_relay_server:
-        routing_rules.append({"domain": _TELEGRAM_DOMAINS + _META_DOMAINS, "outboundTag": "TG-RELAY", "type": "field"})
-        routing_rules.append({"ip": _TELEGRAM_CIDRS + _META_CIDRS, "outboundTag": "TG-RELAY", "type": "field"})
+        # network: tcp only -- TG-RELAY is a Reality/tcp outbound, it cannot
+        # carry raw UDP. Without this, a QUIC (UDP:443) attempt to instagram.com
+        # matches on domain before the QUIC-block rule below ever sees it, gets
+        # routed to a TCP-only outbound, and just hangs instead of failing fast
+        # into the TCP fallback -- so the app's HTML/API shell loads fine but
+        # media (the actual bulk of its traffic, sent over QUIC first) never
+        # does. Leaving UDP unmatched here lets it fall through to that rule.
+        routing_rules.append({"domain": _TELEGRAM_DOMAINS + _META_DOMAINS, "outboundTag": "TG-RELAY", "network": "tcp", "type": "field"})
+        routing_rules.append({"ip": _TELEGRAM_CIDRS + _META_CIDRS, "outboundTag": "TG-RELAY", "network": "tcp", "type": "field"})
 
     # Loopback re-entry rules must be evaluated before the catch-all entry rule
     # below, since they match traffic that has already been routed once.

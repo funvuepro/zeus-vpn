@@ -39,6 +39,12 @@ _TELEGRAM_CIDRS = [
     "91.108.20.0/22", "91.108.56.0/22", "91.105.192.0/23",
     "149.154.160.0/20", "149.154.164.0/22", "149.154.168.0/22", "149.154.172.0/22",
     "95.161.64.0/20",
+    # IPv6 matters as much as v4 here: Telegram is fully v6-enabled and mobile
+    # carriers hand out v6 by default, so the app reaches its DCs over v6 and
+    # a v4-only match list quietly lets that traffic past the relay and into a
+    # tier that can't reach Telegram at all.
+    "2001:b28:f23c::/48", "2001:b28:f23d::/48", "2001:b28:f23f::/48",
+    "2001:67c:4e8::/48", "2a0a:f280::/32",
 ]
 
 # Meta (Instagram/Facebook/WhatsApp) is on Roskomnadzor's blocklist and
@@ -58,6 +64,8 @@ _META_CIDRS = [
     "179.60.192.0/22", "185.60.216.0/22", "185.89.216.0/22",
     "102.132.96.0/20", "103.4.96.0/22", "129.134.0.0/16",
     "173.252.64.0/18", "204.15.20.0/22", "45.64.40.0/22", "74.119.76.0/22",
+    "2a03:2880::/32", "2a03:2887::/32", "2401:db00::/32",
+    "2620:0:1c00::/40", "2803:6080::/32",
 ]
 
 _DNS_CONFIG = {
@@ -292,6 +300,13 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
             "strategy": {"type": "leastPing"},
             "fallbackTag": _LOOPBACK_TAG[fallback] if fallback else "block",
         })
+
+    # None of the Selectel tiers have a global IPv6 address -- only link-local
+    # -- so any v6 destination that reaches a balancer is dead on arrival and
+    # hangs rather than failing. Cutting v6 off here makes clients fall straight
+    # back to v4, which does work. Anything that genuinely needs v6 (Telegram's
+    # DCs, Meta) is already matched by the relay rules above and never gets here.
+    routing_rules.append({"ip": ["::/0"], "outboundTag": "block", "type": "field"})
 
     # MSK/LTE are TCP-only (Reality/tcp, Reality/gRPC) -- they cannot carry raw
     # UDP. QUIC-heavy apps (Instagram, YouTube, anything on HTTP/3) send their

@@ -150,6 +150,23 @@ def test_quic_to_blocklisted_services_relays_over_hysteria_not_the_tcp_leg():
     assert max(rules.index(r) for r in udp_rules) < quic_block_idx
 
 
+def test_ipv6_is_cut_off_but_only_after_the_relay_claims_its_own():
+    servers = [_vless("msk", "msk-1"), _vless("lte", "zeus-lte-aeza-tcp")]
+    config = build_xray_config(USER_UUID, servers)
+    rules = config["routing"]["rules"]
+
+    relay_idx = max(i for i, r in enumerate(rules) if r.get("outboundTag") == "TG-RELAY")
+    v6_block_idx = next(i for i, r in enumerate(rules) if r.get("ip") == ["::/0"])
+    catch_all_idx = next(i for i, r in enumerate(rules) if r.get("network") == "tcp,udp")
+    assert rules[v6_block_idx]["outboundTag"] == "block"
+    assert relay_idx < v6_block_idx < catch_all_idx
+
+    # Telegram and Meta must be matched on v6 too, or the app reaches them over
+    # v6 on a mobile carrier and sails past the relay into a blocked tier.
+    relay_ips = next(r for r in rules if r.get("outboundTag") == "TG-RELAY" and "ip" in r)["ip"]
+    assert any(":" in cidr for cidr in relay_ips)
+
+
 def test_quic_is_blocked_before_the_tcp_only_balancer_catch_all():
     config = build_xray_config(USER_UUID, [_vless("msk", "msk-1")])
     rules = config["routing"]["rules"]

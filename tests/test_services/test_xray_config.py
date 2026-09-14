@@ -123,3 +123,13 @@ def test_no_telegram_relay_rule_without_an_aeza_server():
     config = build_xray_config(USER_UUID, [_vless("msk", "msk-1"), _vless("lte", "lte-1")])
     assert not any(o["tag"] == "TG-RELAY" for o in config["outbounds"])
     assert not any(r.get("outboundTag") == "TG-RELAY" for r in config["routing"]["rules"])
+
+
+def test_quic_is_blocked_before_the_tcp_only_balancer_catch_all():
+    config = build_xray_config(USER_UUID, [_vless("msk", "msk-1")])
+    rules = config["routing"]["rules"]
+
+    quic_block_idx = next(i for i, r in enumerate(rules) if r.get("network") == "udp" and r.get("port") == "443")
+    catch_all_idx = next(i for i, r in enumerate(rules) if r.get("balancerTag") == "msk_balancer")
+    assert rules[quic_block_idx]["outboundTag"] == "block"
+    assert quic_block_idx < catch_all_idx

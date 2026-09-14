@@ -226,6 +226,17 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
             "fallbackTag": _LOOPBACK_TAG[fallback] if fallback else "block",
         })
 
+    # MSK/LTE are TCP-only (Reality/tcp, Reality/gRPC) -- they cannot carry raw
+    # UDP. QUIC-heavy apps (Instagram, YouTube, anything on HTTP/3) send their
+    # real traffic as UDP:443 first; routed into a TCP-only balancer that
+    # traffic doesn't fail fast, it just hangs, and the app never falls back to
+    # its own TLS-over-TCP path. Blocking QUIC outright forces that fallback
+    # immediately, so it flows through the working Reality/TCP tunnel instead.
+    # LLP (Hysteria2/QUIC-native) is unaffected: this only intercepts real
+    # client traffic entering routing fresh, not the internal loopback re-entry
+    # traffic matched by the inboundTag rules above.
+    routing_rules.append({"network": "udp", "port": "443", "outboundTag": "block", "type": "field"})
+
     entry_tier = next((t for t in _TIERS if tier_tags[t]), None)
     if entry_tier:
         routing_rules.append({"balancerTag": _BALANCER_TAG[entry_tier], "type": "field", "network": "tcp,udp"})

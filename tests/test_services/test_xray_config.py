@@ -31,7 +31,7 @@ def test_single_tier_has_one_balancer_and_no_loopback():
     balancers = config["routing"]["balancers"]
     assert len(balancers) == 1
     assert balancers[0]["tag"] == "msk_balancer"
-    assert "fallbackTag" not in balancers[0]
+    assert balancers[0]["fallbackTag"] == "block"
     assert not any(o["protocol"] == "loopback" for o in config["outbounds"])
     assert {"balancerTag": "msk_balancer", "type": "field", "network": "tcp,udp"} in config["routing"]["rules"]
 
@@ -53,7 +53,7 @@ def test_three_tier_cascade_chains_through_loopback_outbounds():
     assert lte_balancer["selector"] == ["LTE-0"]
     assert lte_balancer["fallbackTag"] == "LOOP-LLP"
     assert llp_balancer["selector"] == ["LLP-0"]
-    assert "fallbackTag" not in llp_balancer
+    assert llp_balancer["fallbackTag"] == "block"
 
     loopback_tags = {o["tag"]: o for o in config["outbounds"] if o["protocol"] == "loopback"}
     assert loopback_tags["LOOP-LTE"]["settings"]["inboundTag"] == "LTE-REROUTE"

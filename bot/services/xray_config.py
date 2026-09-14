@@ -222,8 +222,8 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         balancers.append({
             "tag": _BALANCER_TAG[tier],
             "selector": tier_tags[tier],
-            "strategy": {"type": "leastPing"},
-            **({"fallbackTag": _LOOPBACK_TAG[fallback]} if fallback else {}),
+            "strategy": {"type": "leastLoad", "settings": {"expected": 1}},
+            "fallbackTag": _LOOPBACK_TAG[fallback] if fallback else "block",
         })
 
     entry_tier = next((t for t in _TIERS if tier_tags[t]), None)
@@ -257,11 +257,18 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
     if len(all_proxy_tags) > 1:
         config["burstObservatory"] = {
             "pingConfig": {
-                "connectivity": "http://connectivitycheck.platform.hicloud.com/generate_204",
-                "destination": "https://www.google.com/generate_204",
-                "interval": "30s",
-                "sampling": 3,
-                "timeout": "5s",
+                # Empty, not a Huawei/Google URL: a "connectivity" pre-check gate
+                # that itself needs to succeed before any outbound is graded
+                # healthy is one more thing that can be unreachable on a given
+                # network, silently marking every outbound "down" and making the
+                # balancer flap between them without ever settling. Matches the
+                # competitor config confirmed working -- they leave it blank too.
+                "connectivity": "",
+                "destination": "https://www.gstatic.com/generate_204",
+                "httpMethod": "GET",
+                "interval": "1m",
+                "sampling": 2,
+                "timeout": "8s",
             },
             "subjectSelector": [tier.upper() for tier in _TIERS if tier_tags[tier]],
         }

@@ -95,3 +95,26 @@ def test_hysteria2_outbound_uses_happ_dialect():
 def test_single_server_has_no_burst_observatory():
     config = build_xray_config(USER_UUID, [_vless("msk", "msk-1")])
     assert "burstObservatory" not in config
+
+
+def test_telegram_traffic_is_pinned_to_the_aeza_relay():
+    servers = [
+        _vless("msk", "msk-1"),
+        _vless("lte", "zeus-lte-aeza-tcp"),
+        _vless("lte", "zeus-lte-aeza-grpc", transport="grpc"),
+    ]
+    config = build_xray_config(USER_UUID, servers)
+
+    relay_outbounds = [o for o in config["outbounds"] if o["tag"] == "TG-RELAY"]
+    assert len(relay_outbounds) == 1
+    assert relay_outbounds[0]["settings"]["vnext"][0]["address"] == "1.2.3.4"
+
+    rules = config["routing"]["rules"]
+    assert {"domain": ["geosite:telegram"], "outboundTag": "TG-RELAY", "type": "field"} in rules
+    assert {"ip": ["geoip:telegram"], "outboundTag": "TG-RELAY", "type": "field"} in rules
+
+
+def test_no_telegram_relay_rule_without_an_aeza_server():
+    config = build_xray_config(USER_UUID, [_vless("msk", "msk-1"), _vless("lte", "lte-1")])
+    assert not any(o["tag"] == "TG-RELAY" for o in config["outbounds"])
+    assert not any("geosite:telegram" in str(r.get("domain", [])) for r in config["routing"]["rules"])

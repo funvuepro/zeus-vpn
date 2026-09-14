@@ -150,6 +150,17 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
             outbounds.append(_make_outbound(server, user_uuid, tag))
             tier_tags[tier].append(tag)
 
+    # Selectel (our msk/lte hosting) blocks outbound to Telegram's IP ranges at
+    # the network level, same as Timeweb did for the bot server itself -- no
+    # amount of client-side protocol trickery gets through that, since it's
+    # blocked before Xray ever sees the packet. The one non-RU node (its name
+    # marks it as the Telegram relay) isn't behind that block, so Telegram
+    # traffic specifically gets pinned there regardless of which tier the
+    # balancer would otherwise pick.
+    telegram_relay_server = next((s for s in servers if "aeza" in s.name.lower() and s.transport == "tcp"), None)
+    if telegram_relay_server:
+        outbounds.append(_make_outbound(telegram_relay_server, user_uuid, "TG-RELAY"))
+
     outbounds += [
         {"protocol": "freedom", "tag": "direct"},
         {"protocol": "blackhole", "tag": "block"},
@@ -173,6 +184,9 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         {"outboundTag": "direct", "protocol": ["bittorrent"], "type": "field"},
         {"domain": _RU_BYPASS_DOMAINS, "outboundTag": "direct", "type": "field"},
     ]
+    if telegram_relay_server:
+        routing_rules.append({"domain": ["geosite:telegram"], "outboundTag": "TG-RELAY", "type": "field"})
+        routing_rules.append({"ip": ["geoip:telegram"], "outboundTag": "TG-RELAY", "type": "field"})
 
     # Loopback re-entry rules must be evaluated before the catch-all entry rule
     # below, since they match traffic that has already been routed once.

@@ -127,6 +127,29 @@ def test_no_telegram_relay_rule_without_an_aeza_server():
     assert not any(r.get("outboundTag") == "TG-RELAY" for r in config["routing"]["rules"])
 
 
+def test_quic_to_blocklisted_services_relays_over_hysteria_not_the_tcp_leg():
+    servers = [
+        _vless("msk", "msk-1"),
+        _vless("lte", "zeus-lte-aeza-tcp"),
+        _hysteria2("llp", "zeus-llp-aeza"),
+    ]
+    config = build_xray_config(USER_UUID, servers)
+
+    udp_relay = [o for o in config["outbounds"] if o["tag"] == "TG-RELAY-UDP"]
+    assert len(udp_relay) == 1
+    assert udp_relay[0]["protocol"] == "hysteria"
+
+    rules = config["routing"]["rules"]
+    udp_rules = [r for r in rules if r.get("outboundTag") == "TG-RELAY-UDP"]
+    assert len(udp_rules) == 2
+    assert all(r["network"] == "udp" for r in udp_rules)
+
+    # The UDP relay must win over the blanket QUIC block, or Instagram's media
+    # traffic gets blackholed instead of relayed.
+    quic_block_idx = next(i for i, r in enumerate(rules) if r.get("outboundTag") == "block" and r.get("network") == "udp")
+    assert max(rules.index(r) for r in udp_rules) < quic_block_idx
+
+
 def test_quic_is_blocked_before_the_tcp_only_balancer_catch_all():
     config = build_xray_config(USER_UUID, [_vless("msk", "msk-1")])
     rules = config["routing"]["rules"]

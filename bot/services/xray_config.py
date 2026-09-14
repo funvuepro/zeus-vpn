@@ -198,6 +198,16 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
     if blocked_relay_server:
         outbounds.append(_make_outbound(blocked_relay_server, user_uuid, "TG-RELAY"))
 
+    # Reality/tcp can't carry raw UDP, and Instagram sends the bulk of its
+    # traffic over QUIC (UDP:443) -- so the TCP relay alone leaves the app
+    # hanging. Hysteria2 is UDP-native, and we run it on the same non-RU host,
+    # so QUIC to a blocklisted service gets its own relay leg there.
+    blocked_relay_udp_server = next(
+        (s for s in servers if "aeza" in s.name.lower() and s.protocol == "hysteria2"), None
+    )
+    if blocked_relay_udp_server:
+        outbounds.append(_make_outbound(blocked_relay_udp_server, user_uuid, "TG-RELAY-UDP"))
+
     outbounds += [
         {"protocol": "freedom", "tag": "direct"},
         {"protocol": "blackhole", "tag": "block"},
@@ -231,6 +241,10 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         # does. Leaving UDP unmatched here lets it fall through to that rule.
         routing_rules.append({"domain": _TELEGRAM_DOMAINS + _META_DOMAINS, "outboundTag": "TG-RELAY", "network": "tcp", "type": "field"})
         routing_rules.append({"ip": _TELEGRAM_CIDRS + _META_CIDRS, "outboundTag": "TG-RELAY", "network": "tcp", "type": "field"})
+
+    if blocked_relay_udp_server:
+        routing_rules.append({"domain": _TELEGRAM_DOMAINS + _META_DOMAINS, "outboundTag": "TG-RELAY-UDP", "network": "udp", "type": "field"})
+        routing_rules.append({"ip": _TELEGRAM_CIDRS + _META_CIDRS, "outboundTag": "TG-RELAY-UDP", "network": "udp", "type": "field"})
 
     # Loopback re-entry rules must be evaluated before the catch-all entry rule
     # below, since they match traffic that has already been routed once.

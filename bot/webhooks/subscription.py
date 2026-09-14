@@ -618,29 +618,19 @@ async def xray_config(token: str, request: Request):
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
 
-    # Clients want a base64'd list of server *links*, one per line -- hand them
-    # anything else and they report "no server links" and leave the profile
-    # empty. Remnawave already renders correct vless://…/hy2://… URIs for every
-    # host, so those go through as-is and give one entry per server.
-    #
-    # The auto-select cascade has no URI form (balancers, loopback outbounds),
-    # so it rides along as a json:// entry carrying the whole config. A client
-    # that doesn't know that scheme just skips the line and still gets every
-    # individual server.
-    links = list(data.get("links", []))
-    links.insert(
-        0,
-        "json://" + _b64.b64encode(
-            _json.dumps(config, ensure_ascii=False).encode("utf-8")
-        ).decode("ascii"),
-    )
-    body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
+    # Two shapes of subscription exist and they're mutually exclusive: a
+    # base64'd list of vless://-style links (one entry per server, no routing),
+    # or a JSON array of whole xray configs -- which is the only way to ship the
+    # balancer/loopback cascade, since that has no URI representation. The
+    # array is served as plain application/json; a content-disposition header
+    # makes the client treat the response as a file download instead of a
+    # subscription, which silently yields an empty profile.
     title = _b64.b64encode(f"Zeus VPN | {username}".encode("utf-8")).decode("ascii")
     expire_ts = int(_time.time()) + days_left * 86400
 
     return Response(
-        content=body,
-        media_type="text/plain; charset=utf-8",
+        content=_json.dumps([config], ensure_ascii=False),
+        media_type="application/json",
         headers={
             "profile-title": f"base64:{title}",
             "profile-update-interval": "12",

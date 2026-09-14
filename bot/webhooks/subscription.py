@@ -616,8 +616,13 @@ async def xray_config(token: str, request: Request):
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
 
+    # A JSON subscription is an *array* of configs -- each element becomes one
+    # selectable server in the client's list. Returning the bare object parses
+    # to an empty profile: the client fetches and updates it fine, then shows
+    # nothing underneath and every connection attempt times out with no server
+    # to dial.
     return Response(
-        content=_json.dumps(config, ensure_ascii=False, indent=2),
+        content=_json.dumps([config], ensure_ascii=False, indent=2),
         media_type="application/json",
         headers={
             "content-disposition": f'attachment; filename="zeus-vpn-{username}.json"',

@@ -240,7 +240,14 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         balancers.append({
             "tag": _BALANCER_TAG[tier],
             "selector": tier_tags[tier],
-            "strategy": {"type": "leastLoad", "settings": {"expected": 1}},
+            # leastLoad (matching the competitor's raw config) needs enough
+            # burstObservatory health data to grade candidates before it will
+            # route anything at all; when that data isn't there yet -- exactly
+            # what an empty "connectivity" pre-check plus a flaky network
+            # produces -- it fails closed instead of picking *something*, which
+            # read as "connects but nothing loads" end to end. leastPing always
+            # picks the fastest-responding candidate even with sparse data.
+            "strategy": {"type": "leastPing"},
             "fallbackTag": _LOOPBACK_TAG[fallback] if fallback else "block",
         })
 

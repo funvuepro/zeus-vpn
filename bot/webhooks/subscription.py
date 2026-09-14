@@ -618,16 +618,23 @@ async def xray_config(token: str, request: Request):
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
 
-    # Subscription bodies are base64 over text/plain -- that's what Remnawave
-    # itself serves these clients, and what they decode before parsing. The
-    # payload is a JSON *array* of configs (one selectable server per element)
-    # rather than the usual vless:// URI list, because a balancer/loopback
-    # cascade has no URI representation. Served as raw JSON it decoded to
-    # nothing: the client refreshed the profile happily and then showed no
-    # servers under it, so every connect attempt timed out with nothing to dial.
-    body = _b64.b64encode(
-        _json.dumps([config], ensure_ascii=False).encode("utf-8")
-    ).decode("ascii")
+    # Clients want a base64'd list of server *links*, one per line -- hand them
+    # anything else and they report "no server links" and leave the profile
+    # empty. Remnawave already renders correct vless://…/hy2://… URIs for every
+    # host, so those go through as-is and give one entry per server.
+    #
+    # The auto-select cascade has no URI form (balancers, loopback outbounds),
+    # so it rides along as a json:// entry carrying the whole config. A client
+    # that doesn't know that scheme just skips the line and still gets every
+    # individual server.
+    links = list(data.get("links", []))
+    links.insert(
+        0,
+        "json://" + _b64.b64encode(
+            _json.dumps(config, ensure_ascii=False).encode("utf-8")
+        ).decode("ascii"),
+    )
+    body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
     title = _b64.b64encode(f"Zeus VPN | {username}".encode("utf-8")).decode("ascii")
     expire_ts = int(_time.time()) + days_left * 86400
 

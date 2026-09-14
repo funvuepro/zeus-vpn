@@ -108,6 +108,19 @@ def _make_outbound(server: VpnServer, user_uuid: str, tag: str) -> dict:
             "streamSettings": {
                 "network": "hysteria",
                 "security": "tls",
+                # QUIC tuning the competitor's working config carries. Path MTU
+                # discovery off matters most: QUIC sets DF on every datagram, and
+                # a black-holed "fragmentation needed" ICMP anywhere on a mobile
+                # path stalls the connection instead of downshifting.
+                "finalmask": {
+                    "quicParams": {
+                        "congestion": "bbr",
+                        "debug": False,
+                        "disablePathMTUDiscovery": True,
+                        "keepAlivePeriod": 6,
+                        "maxIdleTimeout": 60,
+                    }
+                },
                 "hysteriaSettings": {
                     "auth": server.auth_password,
                     "version": 2,
@@ -116,7 +129,13 @@ def _make_outbound(server: VpnServer, user_uuid: str, tag: str) -> dict:
                     "alpn": ["h3"],
                     "enableSessionResumption": False,
                     "fingerprint": server.fingerprint,
+                    # serverName is the decoy SNI; the cert the node actually
+                    # presents is for cert_name, and that's what gets verified.
+                    # Without this the client checks the cert against the decoy
+                    # name, fails, and drops the connection before any traffic
+                    # flows -- which is why this whole tier was dead.
                     "serverName": server.server_name,
+                    **({"verifyPeerCertByName": server.cert_name} if server.cert_name else {}),
                 },
             },
             "tag": tag,

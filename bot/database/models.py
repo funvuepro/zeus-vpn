@@ -112,6 +112,9 @@ class VpnServer(Base):
     fingerprint = Column(String, nullable=False, default="firefox")
     service_name = Column(String, nullable=True)
     auth_password = Column(String, nullable=True)
+    # hysteria2 only: the name on the certificate the node actually presents,
+    # which the client verifies instead of the decoy SNI in server_name.
+    cert_name = Column(String, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     # msk: plain Reality/TCP (first tier) -- lte: Reality/TCP+gRPC (harder to fingerprint,
     # falls back to when MSK is down) -- llp: Hysteria2/QUIC (last resort under heavy DPI)

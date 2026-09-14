@@ -97,7 +97,7 @@ def test_single_server_has_no_burst_observatory():
     assert "burstObservatory" not in config
 
 
-def test_telegram_traffic_is_pinned_to_the_aeza_relay():
+def test_blocklisted_traffic_is_pinned_to_the_aeza_relay():
     servers = [
         _vless("msk", "msk-1"),
         _vless("lte", "zeus-lte-aeza-tcp"),
@@ -110,10 +110,12 @@ def test_telegram_traffic_is_pinned_to_the_aeza_relay():
     assert relay_outbounds[0]["settings"]["vnext"][0]["address"] == "1.2.3.4"
 
     rules = config["routing"]["rules"]
-    telegram_domain_rule = next(r for r in rules if r.get("outboundTag") == "TG-RELAY" and "domain" in r)
-    telegram_ip_rule = next(r for r in rules if r.get("outboundTag") == "TG-RELAY" and "ip" in r)
-    assert "domain:telegram.org" in telegram_domain_rule["domain"]
-    assert "91.108.4.0/22" in telegram_ip_rule["ip"]
+    domain_rule = next(r for r in rules if r.get("outboundTag") == "TG-RELAY" and "domain" in r)
+    ip_rule = next(r for r in rules if r.get("outboundTag") == "TG-RELAY" and "ip" in r)
+    assert "domain:telegram.org" in domain_rule["domain"]
+    assert "domain:instagram.com" in domain_rule["domain"]
+    assert "91.108.4.0/22" in ip_rule["ip"]
+    assert "157.240.0.0/16" in ip_rule["ip"]
     # Must not depend on a geo database the client's Xray build may not have --
     # an unresolvable geosite/geoip category can fail the whole routing config.
     assert not any("geosite:" in str(r.get("domain", [])) or "geoip:" in str(r.get("ip", [])) for r in rules)

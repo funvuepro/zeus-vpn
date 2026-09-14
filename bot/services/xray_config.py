@@ -41,6 +41,23 @@ _TELEGRAM_CIDRS = [
     "95.161.64.0/20",
 ]
 
+# Meta (Instagram/Facebook/WhatsApp) is on Roskomnadzor's blocklist and
+# Selectel enforces it at their network edge, same as Telegram -- confirmed by
+# a plain curl straight from a Selectel node timing out on instagram.com,
+# facebook.com and web.whatsapp.com alike with no VPN involved at all. Same
+# relay, same reasoning: explicit list, not geosite/geoip.
+_META_DOMAINS = [
+    "domain:instagram.com", "domain:cdninstagram.com",
+    "domain:facebook.com", "domain:fb.com", "domain:facebook.net", "domain:fbcdn.net",
+    "domain:whatsapp.com", "domain:whatsapp.net",
+    "domain:messenger.com",
+]
+_META_CIDRS = [
+    "157.240.0.0/16", "31.13.24.0/21", "31.13.64.0/18",
+    "69.171.224.0/19", "179.60.192.0/22", "185.60.216.0/22",
+    "102.132.96.0/20",
+]
+
 _DNS_CONFIG = {
     "disableCache": False,
     "disableFallback": False,
@@ -167,16 +184,17 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
             outbounds.append(_make_outbound(server, user_uuid, tag))
             tier_tags[tier].append(tag)
 
-    # Selectel (our msk/lte hosting) blocks outbound to Telegram's IP ranges at
-    # the network level, same as Timeweb did for the bot server itself -- no
-    # amount of client-side protocol trickery gets through that, since it's
-    # blocked before Xray ever sees the packet. The one non-RU node (its name
-    # marks it as the Telegram relay) isn't behind that block, so Telegram
-    # traffic specifically gets pinned there regardless of which tier the
-    # balancer would otherwise pick.
-    telegram_relay_server = next((s for s in servers if "aeza" in s.name.lower() and s.transport == "tcp"), None)
-    if telegram_relay_server:
-        outbounds.append(_make_outbound(telegram_relay_server, user_uuid, "TG-RELAY"))
+    # Selectel (our msk/lte hosting) enforces Roskomnadzor's blocklist at the
+    # network level -- confirmed for both Telegram and the whole Meta family
+    # (Instagram/Facebook/WhatsApp all time out via plain curl straight from a
+    # Selectel node, no VPN involved). No amount of client-side protocol
+    # trickery gets through that, since it's blocked before Xray ever sees the
+    # packet. The one non-RU node (its name marks it as the relay) isn't
+    # behind that block, so traffic to any blocklisted service gets pinned
+    # there regardless of which tier the balancer would otherwise pick.
+    blocked_relay_server = next((s for s in servers if "aeza" in s.name.lower() and s.transport == "tcp"), None)
+    if blocked_relay_server:
+        outbounds.append(_make_outbound(blocked_relay_server, user_uuid, "TG-RELAY"))
 
     outbounds += [
         {"protocol": "freedom", "tag": "direct"},
@@ -201,9 +219,9 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
         {"outboundTag": "direct", "protocol": ["bittorrent"], "type": "field"},
         {"domain": _RU_BYPASS_DOMAINS, "outboundTag": "direct", "type": "field"},
     ]
-    if telegram_relay_server:
-        routing_rules.append({"domain": _TELEGRAM_DOMAINS, "outboundTag": "TG-RELAY", "type": "field"})
-        routing_rules.append({"ip": _TELEGRAM_CIDRS, "outboundTag": "TG-RELAY", "type": "field"})
+    if blocked_relay_server:
+        routing_rules.append({"domain": _TELEGRAM_DOMAINS + _META_DOMAINS, "outboundTag": "TG-RELAY", "type": "field"})
+        routing_rules.append({"ip": _TELEGRAM_CIDRS + _META_CIDRS, "outboundTag": "TG-RELAY", "type": "field"})
 
     # Loopback re-entry rules must be evaluated before the catch-all entry rule
     # below, since they match traffic that has already been routed once.

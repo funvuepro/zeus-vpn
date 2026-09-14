@@ -1,6 +1,8 @@
+import base64 as _b64
 import html as _html
 import httpx
 import json as _json
+import time as _time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -616,19 +618,27 @@ async def xray_config(token: str, request: Request):
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
 
-    # A JSON subscription is an *array* of configs -- each element becomes one
-    # selectable server in the client's list. Returning the bare object parses
-    # to an empty profile: the client fetches and updates it fine, then shows
-    # nothing underneath and every connection attempt times out with no server
-    # to dial.
+    # Subscription bodies are base64 over text/plain -- that's what Remnawave
+    # itself serves these clients, and what they decode before parsing. The
+    # payload is a JSON *array* of configs (one selectable server per element)
+    # rather than the usual vless:// URI list, because a balancer/loopback
+    # cascade has no URI representation. Served as raw JSON it decoded to
+    # nothing: the client refreshed the profile happily and then showed no
+    # servers under it, so every connect attempt timed out with nothing to dial.
+    body = _b64.b64encode(
+        _json.dumps([config], ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+    title = _b64.b64encode(f"Zeus VPN | {username}".encode("utf-8")).decode("ascii")
+    expire_ts = int(_time.time()) + days_left * 86400
+
     return Response(
-        content=_json.dumps([config], ensure_ascii=False, indent=2),
-        media_type="application/json",
+        content=body,
+        media_type="text/plain; charset=utf-8",
         headers={
-            "content-disposition": f'attachment; filename="zeus-vpn-{username}.json"',
-            "profile-title": f"Zeus VPN | {username}",
-            "profile-update-interval": "24",
-            "subscription-userinfo": f"expire={days_left}",
+            "profile-title": f"base64:{title}",
+            "profile-update-interval": "12",
+            "profile-web-page-url": f"{_remnawave_base()}/api/sub/{token}",
+            "subscription-userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
         },
     )
 

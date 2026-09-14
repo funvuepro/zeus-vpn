@@ -110,11 +110,16 @@ def test_telegram_traffic_is_pinned_to_the_aeza_relay():
     assert relay_outbounds[0]["settings"]["vnext"][0]["address"] == "1.2.3.4"
 
     rules = config["routing"]["rules"]
-    assert {"domain": ["geosite:telegram"], "outboundTag": "TG-RELAY", "type": "field"} in rules
-    assert {"ip": ["geoip:telegram"], "outboundTag": "TG-RELAY", "type": "field"} in rules
+    telegram_domain_rule = next(r for r in rules if r.get("outboundTag") == "TG-RELAY" and "domain" in r)
+    telegram_ip_rule = next(r for r in rules if r.get("outboundTag") == "TG-RELAY" and "ip" in r)
+    assert "domain:telegram.org" in telegram_domain_rule["domain"]
+    assert "91.108.4.0/22" in telegram_ip_rule["ip"]
+    # Must not depend on a geo database the client's Xray build may not have --
+    # an unresolvable geosite/geoip category can fail the whole routing config.
+    assert not any("geosite:" in str(r.get("domain", [])) or "geoip:" in str(r.get("ip", [])) for r in rules)
 
 
 def test_no_telegram_relay_rule_without_an_aeza_server():
     config = build_xray_config(USER_UUID, [_vless("msk", "msk-1"), _vless("lte", "lte-1")])
     assert not any(o["tag"] == "TG-RELAY" for o in config["outbounds"])
-    assert not any("geosite:telegram" in str(r.get("domain", [])) for r in config["routing"]["rules"])
+    assert not any(r.get("outboundTag") == "TG-RELAY" for r in config["routing"]["rules"])

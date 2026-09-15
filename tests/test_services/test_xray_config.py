@@ -150,6 +150,21 @@ def test_quic_to_blocklisted_services_relays_over_hysteria_not_the_tcp_leg():
     assert max(rules.index(r) for r in udp_rules) < quic_block_idx
 
 
+def test_aeza_is_relay_only_not_a_general_tier_candidate():
+    servers = [
+        _vless("lte", "zeus-lte-1"),
+        _vless("lte", "zeus-lte-aeza-tcp"),
+    ]
+    config = build_xray_config(USER_UUID, servers)
+
+    # Aeza gets its own TG-RELAY outbound but must not also claim an LTE-N
+    # slot -- otherwise leastPing can route ordinary, unblocked traffic
+    # through Stockholm right alongside much closer Selectel nodes.
+    lte_balancer = next(b for b in config["routing"]["balancers"] if b["tag"] == "lte_balancer")
+    assert lte_balancer["selector"] == ["LTE-0"]
+    assert any(o["tag"] == "TG-RELAY" for o in config["outbounds"])
+
+
 def test_ipv6_is_cut_off_but_only_after_the_relay_claims_its_own():
     servers = [_vless("msk", "msk-1"), _vless("lte", "zeus-lte-aeza-tcp")]
     config = build_xray_config(USER_UUID, servers)

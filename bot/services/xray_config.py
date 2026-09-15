@@ -206,8 +206,15 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
     tier_tags: dict[str, list[str]] = {tier: [] for tier in _TIERS}
     outbounds = []
 
+    # The Aeza node is a dedicated relay for blocklisted services (its own
+    # outbounds below), not a general-purpose tier candidate. Left in the
+    # regular selector it competes with much closer Selectel nodes for every
+    # *unblocked* connection too -- leastPing has no notion of "only use this
+    # one for Telegram", so ordinary browsing traffic would intermittently
+    # detour through Stockholm for no reason, adding real latency across the
+    # board rather than just where the relay is actually needed.
     for tier in _TIERS:
-        tier_servers = [s for s in servers if s.tier == tier]
+        tier_servers = [s for s in servers if s.tier == tier and "aeza" not in s.name.lower()]
         for i, server in enumerate(tier_servers):
             tag = f"{tier.upper()}-{i}"
             outbounds.append(_make_outbound(server, user_uuid, tag))

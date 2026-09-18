@@ -568,9 +568,7 @@ async def subscription_proxy(token: str, request: Request):
 
 @router.get("/xray/{token}")
 async def xray_config(token: str, request: Request):
-    """Return full multi-server Xray JSON config for auto-selection clients."""
-    from bot.database.models import VpnServer
-    from bot.services.xray_config import build_xray_config
+    """Return the panel VLESS links as a base64 subscription."""
 
     # Validate token via Remnawave. The JSON metadata form (isFound/user/links) is only
     # returned for an "Accept: text/html" request -- anything else gets the raw base64
@@ -588,79 +586,23 @@ async def xray_config(token: str, request: Request):
         data = resp.json()
         if not data.get("isFound"):
             return JSONResponse({"error": "subscription not found"}, status_code=404)
-        # The user object has no vless client id (shortUuid is the subscription token
-        # itself) -- pull the real uuid out of the first vless:// link instead.
-        import re
-        user_uuid = None
-        for link in data.get("links", []):
-            m = re.match(r"vless://([0-9a-f-]{36})@", link)
-            if m:
-                user_uuid = m.group(1)
-                break
-        if not user_uuid:
-            return JSONResponse({"error": "user uuid not found"}, status_code=404)
     except Exception:
         return JSONResponse({"error": "invalid response"}, status_code=500)
-
-    # Load active servers from DB
-    from bot.database.session import AsyncSessionLocal
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(VpnServer).where(VpnServer.is_active == True).order_by(VpnServer.tier.desc(), VpnServer.id)
-        )
-        servers = result.scalars().all()
-
-    if not servers:
-        return JSONResponse({"error": "no servers configured"}, status_code=503)
-
-    config = build_xray_config(user_uuid=user_uuid, servers=servers)
-
-    # Happ on iOS may reject a mixed Xray profile containing the custom
-    # Hysteria dialect and loopback fallback outbounds used by the full
-    # cascade. Serve a conservative VLESS-only profile to keep import and
-    # startup reliable; Telegram still uses the dedicated VLESS relay.
-    supported = {"vless", "freedom", "blackhole"}
-    config["outbounds"] = [o for o in config["outbounds"] if o.get("protocol") in supported]
-    vless_tags = [o["tag"] for o in config["outbounds"] if o.get("protocol") == "vless"]
-    relay_tags = {"TG-RELAY"}
-    regular_tags = [t for t in vless_tags if t not in relay_tags]
-    entry = next((t for t in regular_tags if t.startswith("MSK-")), regular_tags[0] if regular_tags else "direct")
-    kept_rules = []
-    for rule in config["routing"]["rules"]:
-        tag = rule.get("outboundTag")
-        if tag in relay_tags or tag == "direct":
-            kept_rules.append(rule)
-    # Auto-select the fastest VLESS node. No loopback fallback is used in the
-    # iOS profile; the fallback is a real first node, so import and startup are
-    # deterministic even before the first probe cycle completes.
-    if regular_tags:
-        config["routing"]["balancers"] = [{
-            "tag": "auto_balancer",
-            "selector": regular_tags,
-            "strategy": {"type": "leastPing"},
-            "fallbackTag": entry,
-        }]
-        kept_rules.append({"balancerTag": "auto_balancer", "type": "field", "network": "tcp,udp"})
-    else:
-        kept_rules.append({"outboundTag": entry, "type": "field", "network": "tcp,udp"})
-    config["routing"] = {"balancers": config["routing"].get("balancers", []), "domainMatcher": "hybrid", "domainStrategy": "IPIfNonMatch", "rules": kept_rules}
 
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
 
-    # Two shapes of subscription exist and they're mutually exclusive: a
-    # base64'd list of vless://-style links (one entry per server, no routing),
-    # or a JSON array of whole xray configs -- which is the only way to ship the
-    # balancer/loopback cascade, since that has no URI representation. The
-    # array is served as plain application/json; a content-disposition header
-    # makes the client treat the response as a file download instead of a
-    # subscription, which silently yields an empty profile.
+    # URI subscriptions carry server connection settings, not JSON routing.
     title = _b64.b64encode(f"Zeus VPN | {username}".encode("utf-8")).decode("ascii")
     expire_ts = int(_time.time()) + days_left * 86400
+    links = [link for link in data.get("links", []) if isinstance(link, str) and link.startswith("vless://")]
+    if not links:
+        return JSONResponse({"error": "no vless links"}, status_code=503)
+    body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
 
     return Response(
-        content=_json.dumps([config], ensure_ascii=False),
-        media_type="application/json",
+        content=body,
+        media_type="text/plain",
         headers={
             "profile-title": f"base64:{title}",
             "profile-update-interval": "12",

@@ -231,12 +231,9 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
     # there regardless of which tier the balancer would otherwise pick.
     blocked_relay_server = next((s for s in servers if "aeza" in s.name.lower() and s.transport == "tcp"), None)
     if blocked_relay_server:
-        relay = _make_outbound(blocked_relay_server, user_uuid, "TG-RELAY")
-        # Telegram opens many parallel MTProto connections on mobile. Reusing
-        # a small number of multiplexed streams avoids a burst of independent
-        # Reality/TLS handshakes on the relay during app startup.
-        relay["mux"] = {"enabled": True, "concurrency": 8}
-        outbounds.append(relay)
+        # Preserve the previously working VLESS/Reality settings. Enabling mux
+        # here was followed by a reported Telegram connection regression.
+        outbounds.append(_make_outbound(blocked_relay_server, user_uuid, "TG-RELAY"))
 
     # Reality/tcp can't carry raw UDP, and Instagram sends the bulk of its
     # traffic over QUIC (UDP:443) -- so the TCP relay alone leaves the app

@@ -615,6 +615,23 @@ async def xray_config(token: str, request: Request):
 
     config = build_xray_config(user_uuid=user_uuid, servers=servers)
 
+    # Happ on iOS may reject a mixed Xray profile containing the custom
+    # Hysteria dialect and loopback fallback outbounds used by the full
+    # cascade. Serve a conservative VLESS-only profile to keep import and
+    # startup reliable; Telegram still uses the dedicated VLESS relay.
+    supported = {"vless", "freedom", "blackhole"}
+    config["outbounds"] = [o for o in config["outbounds"] if o.get("protocol") in supported]
+    vless_tags = [o["tag"] for o in config["outbounds"] if o.get("protocol") == "vless"]
+    entry = next((t for t in vless_tags if t.startswith("MSK-")), vless_tags[0] if vless_tags else "direct")
+    relay_tags = {"TG-RELAY"}
+    kept_rules = []
+    for rule in config["routing"]["rules"]:
+        tag = rule.get("outboundTag")
+        if tag in relay_tags or tag == "direct":
+            kept_rules.append(rule)
+    kept_rules.append({"outboundTag": entry, "type": "field", "network": "tcp,udp"})
+    config["routing"] = {"domainMatcher": "hybrid", "domainStrategy": "IPIfNonMatch", "rules": kept_rules}
+
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
 

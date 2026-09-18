@@ -39,6 +39,7 @@ _TELEGRAM_CIDRS = [
     "91.108.20.0/22", "91.108.56.0/22", "91.105.192.0/23",
     "149.154.160.0/20", "149.154.164.0/22", "149.154.168.0/22", "149.154.172.0/22",
     "95.161.64.0/20",
+    "185.76.151.0/24",
     # IPv6 matters as much as v4 here: Telegram is fully v6-enabled and mobile
     # carriers hand out v6 by default, so the app reaches its DCs over v6 and
     # a v4-only match list quietly lets that traffic past the relay and into a
@@ -230,7 +231,12 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
     # there regardless of which tier the balancer would otherwise pick.
     blocked_relay_server = next((s for s in servers if "aeza" in s.name.lower() and s.transport == "tcp"), None)
     if blocked_relay_server:
-        outbounds.append(_make_outbound(blocked_relay_server, user_uuid, "TG-RELAY"))
+        relay = _make_outbound(blocked_relay_server, user_uuid, "TG-RELAY")
+        # Telegram opens many parallel MTProto connections on mobile. Reusing
+        # a small number of multiplexed streams avoids a burst of independent
+        # Reality/TLS handshakes on the relay during app startup.
+        relay["mux"] = {"enabled": True, "concurrency": 8}
+        outbounds.append(relay)
 
     # Reality/tcp can't carry raw UDP, and Instagram sends the bulk of its
     # traffic over QUIC (UDP:443) -- so the TCP relay alone leaves the app

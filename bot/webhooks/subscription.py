@@ -622,15 +622,28 @@ async def xray_config(token: str, request: Request):
     supported = {"vless", "freedom", "blackhole"}
     config["outbounds"] = [o for o in config["outbounds"] if o.get("protocol") in supported]
     vless_tags = [o["tag"] for o in config["outbounds"] if o.get("protocol") == "vless"]
-    entry = next((t for t in vless_tags if t.startswith("MSK-")), vless_tags[0] if vless_tags else "direct")
     relay_tags = {"TG-RELAY"}
+    regular_tags = [t for t in vless_tags if t not in relay_tags]
+    entry = next((t for t in regular_tags if t.startswith("MSK-")), regular_tags[0] if regular_tags else "direct")
     kept_rules = []
     for rule in config["routing"]["rules"]:
         tag = rule.get("outboundTag")
         if tag in relay_tags or tag == "direct":
             kept_rules.append(rule)
-    kept_rules.append({"outboundTag": entry, "type": "field", "network": "tcp,udp"})
-    config["routing"] = {"domainMatcher": "hybrid", "domainStrategy": "IPIfNonMatch", "rules": kept_rules}
+    # Auto-select the fastest VLESS node. No loopback fallback is used in the
+    # iOS profile; the fallback is a real first node, so import and startup are
+    # deterministic even before the first probe cycle completes.
+    if regular_tags:
+        config["routing"]["balancers"] = [{
+            "tag": "auto_balancer",
+            "selector": regular_tags,
+            "strategy": {"type": "leastPing"},
+            "fallbackTag": entry,
+        }]
+        kept_rules.append({"balancerTag": "auto_balancer", "type": "field", "network": "tcp,udp"})
+    else:
+        kept_rules.append({"outboundTag": entry, "type": "field", "network": "tcp,udp"})
+    config["routing"] = {"balancers": config["routing"].get("balancers", []), "domainMatcher": "hybrid", "domainStrategy": "IPIfNonMatch", "rules": kept_rules}
 
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)

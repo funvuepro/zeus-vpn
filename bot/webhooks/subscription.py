@@ -4,6 +4,7 @@ import httpx
 import json as _json
 import time as _time
 from datetime import datetime, timezone
+from urllib.parse import unquote as _urllib_unquote
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy import select
@@ -566,28 +567,54 @@ async def subscription_proxy(token: str, request: Request):
     )
 
 
+def _link_node_name(link: str) -> str | None:
+    fragment = link.rsplit("#", 1)[-1] if "#" in link else None
+    return _urllib_unquote(fragment) if fragment else None
+
+
+async def _unreachable_node_names(client: httpx.AsyncClient) -> set[str]:
+    # Best-effort: an entire provider's worth of nodes can drop off the
+    # network at once (Selectel's whole account went dark on 2026-09-20,
+    # same failure mode Timeweb had). Individual VLESS links carry no health
+    # info of their own, so without this a client can pin to a dead server
+    # indefinitely -- "connects but nothing loads". If this check itself
+    # fails, serve every link unfiltered rather than break the subscription.
+    try:
+        resp = await client.get(
+            f"{_remnawave_base()}/api/nodes",
+            headers={"Authorization": f"Bearer {get_settings().REMNAWAVE_API_TOKEN}"},
+        )
+        nodes = resp.json()
+        nodes = nodes.get("response", nodes)
+        return {n["name"] for n in nodes if not n.get("isConnected")}
+    except Exception:
+        return set()
+
+
 @router.get("/xray/{token}")
 async def xray_config(token: str, request: Request):
     """Return the panel VLESS links as a base64 subscription."""
 
-    # Validate token via Remnawave. The JSON metadata form (isFound/user/links) is only
-    # returned for an "Accept: text/html" request -- anything else gets the raw base64
-    # subscription body instead, regardless of what the real client sent.
     async with httpx.AsyncClient() as client:
+        # Validate token via Remnawave. The JSON metadata form (isFound/user/links) is
+        # only returned for an "Accept: text/html" request -- anything else gets the raw
+        # base64 subscription body instead, regardless of what the real client sent.
         resp = await client.get(
             f"{_remnawave_base()}/api/sub/{token}",
             headers={"Accept": "text/html"},
         )
 
-    if resp.status_code != 200:
-        return JSONResponse({"error": "subscription not found"}, status_code=404)
-
-    try:
-        data = resp.json()
-        if not data.get("isFound"):
+        if resp.status_code != 200:
             return JSONResponse({"error": "subscription not found"}, status_code=404)
-    except Exception:
-        return JSONResponse({"error": "invalid response"}, status_code=500)
+
+        try:
+            data = resp.json()
+            if not data.get("isFound"):
+                return JSONResponse({"error": "subscription not found"}, status_code=404)
+        except Exception:
+            return JSONResponse({"error": "invalid response"}, status_code=500)
+
+        down_nodes = await _unreachable_node_names(client)
 
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
@@ -596,6 +623,11 @@ async def xray_config(token: str, request: Request):
     title = _b64.b64encode(f"Zeus VPN | {username}".encode("utf-8")).decode("ascii")
     expire_ts = int(_time.time()) + days_left * 86400
     links = [link for link in data.get("links", []) if isinstance(link, str) and link.startswith("vless://")]
+    if down_nodes:
+        def _is_down(link: str) -> bool:
+            name = _link_node_name(link)
+            return bool(name) and any(name == n or name.startswith(f"{n}-") for n in down_nodes)
+        links = [link for link in links if not _is_down(link)]
     if not links:
         return JSONResponse({"error": "no vless links"}, status_code=503)
     body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")

@@ -28,3 +28,50 @@ async def test_link_subscription(monkeypatch, payload, status, expected):
     if expected is not None:
         assert result.media_type == 'text/plain'
         assert base64.b64decode(result.body, validate=True).decode().splitlines() == expected
+
+
+async def test_links_to_unreachable_nodes_are_dropped(monkeypatch):
+    # Not hypothetical: an entire provider account can go dark at once (this
+    # is exactly what happened to Selectel on 2026-09-20 -- 11 of 12 nodes
+    # EHOSTUNREACH simultaneously). A client that pins to one of those dead
+    # links "connects but nothing loads" until the 12h profile-update-interval
+    # rolls around, so a still-down node's links must not be served at all.
+    sub_payload = {
+        'isFound': True,
+        'links': [
+            'vless://a@1.1.1.1:443?x=1#zeus-msk-1',
+            'vless://b@2.2.2.2:443?x=1#zeus-lte-1-tcp',
+            'vless://c@2.2.2.2:8443?x=1#zeus-lte-1-grpc',
+            'vless://d@3.3.3.3:443?x=1#zeus-lte-10-tcp',
+            'vless://e@4.4.4.4:443?x=1#zeus-lte-aeza-tcp',
+        ],
+    }
+    nodes_payload = {
+        'response': [
+            {'name': 'zeus-msk-1', 'isConnected': False},
+            {'name': 'zeus-lte-1', 'isConnected': False},
+            {'name': 'zeus-lte-10', 'isConnected': True},
+            {'name': 'zeus-lte-aeza', 'isConnected': True},
+        ]
+    }
+    sub_response = Mock(status_code=200)
+    sub_response.json.return_value = sub_payload
+    nodes_response = Mock(status_code=200)
+    nodes_response.json.return_value = nodes_payload
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.side_effect = [sub_response, nodes_response]
+    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
+    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
+
+    result = await subscription.xray_config('test', Request({'type': 'http'}))
+
+    assert result.status_code == 200
+    kept = base64.b64decode(result.body, validate=True).decode().splitlines()
+    # zeus-msk-1 and zeus-lte-1(-tcp/-grpc) are down and must be dropped;
+    # zeus-lte-10 must survive despite "zeus-lte-1" being a prefix of its
+    # name, and zeus-lte-aeza (up) must survive too.
+    assert kept == [
+        'vless://d@3.3.3.3:443?x=1#zeus-lte-10-tcp',
+        'vless://e@4.4.4.4:443?x=1#zeus-lte-aeza-tcp',
+    ]

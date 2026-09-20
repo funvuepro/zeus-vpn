@@ -30,6 +30,35 @@ async def test_link_subscription(monkeypatch, payload, status, expected):
         assert base64.b64decode(result.body, validate=True).decode().splitlines() == expected
 
 
+async def test_grpc_links_are_dropped(monkeypatch):
+    # Confirmed live on 2026-09-20 via packet capture on the relay node: every
+    # grpc connection attempt from the real Happ client falls through to
+    # Reality's decoy-proxy fallback (byte-for-byte mirrored to the decoy site
+    # instead of tunneling), while the identical link works fine from plain
+    # xray-core -- a client-side uTLS mismatch, not a server misconfiguration.
+    # tcp must survive; grpc must not, regardless of node health.
+    payload = {
+        'isFound': True,
+        'links': [
+            'vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp',
+            'vless://a@1.1.1.1:8443?type=grpc&serviceName=grpc#zeus-lte-aeza-grpc',
+        ],
+    }
+    response = Mock(status_code=200)
+    response.json.return_value = payload
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.return_value = response
+    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
+    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
+
+    result = await subscription.xray_config('test', Request({'type': 'http'}))
+
+    assert result.status_code == 200
+    kept = base64.b64decode(result.body, validate=True).decode().splitlines()
+    assert kept == ['vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp']
+
+
 async def test_links_to_unreachable_nodes_are_dropped(monkeypatch):
     # Not hypothetical: an entire provider account can go dark at once (this
     # is exactly what happened to Selectel on 2026-09-20 -- 11 of 12 nodes

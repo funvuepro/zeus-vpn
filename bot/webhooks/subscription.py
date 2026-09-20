@@ -628,6 +628,15 @@ async def xray_config(token: str, request: Request):
             name = _link_node_name(link)
             return bool(name) and any(name == n or name.startswith(f"{n}-") for n in down_nodes)
         links = [link for link in links if not _is_down(link)]
+    # grpc links fail Reality's authentication for real Happ clients (confirmed
+    # live on 2026-09-20: packet capture on the relay node showed every grpc
+    # connection attempt from the actual phone client falling through to
+    # Reality's decoy-proxy fallback -- byte-for-byte mirrored to the decoy
+    # site instead of tunneling -- while the identical link tested fine from a
+    # plain xray-core client. Likely a uTLS fingerprint mismatch specific to
+    # Happ's bundled client build. Drop grpc links until that's understood;
+    # tcp is unaffected and confirmed working end-to-end.
+    links = [link for link in links if "type=grpc" not in link]
     if not links:
         return JSONResponse({"error": "no vless links"}, status_code=503)
     body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")

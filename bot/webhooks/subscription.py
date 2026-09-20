@@ -572,6 +572,38 @@ def _link_node_name(link: str) -> str | None:
     return _urllib_unquote(fragment) if fragment else None
 
 
+async def _hysteria2_links() -> list[str]:
+    # Hysteria2/QUIC nodes aren't Remnawave-managed Xray inbounds (a separate
+    # tobyxdd/hysteria container, not xray-core), so they never show up in
+    # Remnawave's own link list. They matter more now than when this was
+    # written: Russian DPI (TSPU) moved to behavioral fingerprinting of
+    # VLESS+TCP+Reality traffic in mid-2026, catching TCP and gRPC alike --
+    # QUIC's wire format doesn't match that signature at all. Best-effort: a
+    # DB hiccup here should degrade to "no hysteria2 option", not break the
+    # whole subscription.
+    try:
+        from bot.database.models import VpnServer
+        from bot.database.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(VpnServer).where(VpnServer.protocol == "hysteria2", VpnServer.is_active == True)
+            )
+            servers = result.scalars().all()
+    except Exception:
+        return []
+
+    links = []
+    for s in servers:
+        # The real cert is issued for cert_name, not the decoy in server_name --
+        # sni must match what the server actually presents or the client's
+        # certificate check fails outright (there's no separate override in a
+        # plain hysteria2:// URI the way Happ's own JSON dialect allows).
+        sni = s.cert_name or s.server_name
+        links.append(f"hysteria2://{s.auth_password}@{s.ip}:{s.port}/?sni={sni}&insecure=0#{s.name}")
+    return links
+
+
 async def _unreachable_node_names(client: httpx.AsyncClient) -> set[str]:
     # Best-effort: an entire provider's worth of nodes can drop off the
     # network at once (Selectel's whole account went dark on 2026-09-20,
@@ -637,6 +669,7 @@ async def xray_config(token: str, request: Request):
     # Happ's bundled client build. Drop grpc links until that's understood;
     # tcp is unaffected and confirmed working end-to-end.
     links = [link for link in links if "type=grpc" not in link]
+    links += await _hysteria2_links()
     if not links:
         return JSONResponse({"error": "no vless links"}, status_code=503)
     body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")

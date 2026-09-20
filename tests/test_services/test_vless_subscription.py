@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from starlette.requests import Request
 
+from bot.database.models import VpnServer
 from bot.webhooks import subscription
 
 
@@ -57,6 +58,40 @@ async def test_grpc_links_are_dropped(monkeypatch):
     assert result.status_code == 200
     kept = base64.b64decode(result.body, validate=True).decode().splitlines()
     assert kept == ['vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp']
+
+
+async def test_hysteria2_servers_are_appended_to_the_subscription(monkeypatch, db_session):
+    # Hysteria2/QUIC nodes are a separate hysteria container, not a
+    # Remnawave-managed Xray inbound, so Remnawave's own link list never
+    # includes them -- they have to be appended from our own DB. This matters
+    # more now that Russian DPI (TSPU) fingerprints VLESS+TCP+Reality traffic
+    # behaviorally: QUIC doesn't match that pattern at all.
+    db_session.add(VpnServer(
+        name="zeus-llp-aeza", ip="109.120.132.0", port=8444, protocol="hysteria2",
+        transport="tcp", fingerprint="edge", server_name="yastatic.net",
+        cert_name="llp.krzmihome.ru", auth_password="secretpass", is_active=True,
+    ))
+    await db_session.commit()
+
+    payload = {
+        'isFound': True,
+        'links': ['vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp'],
+    }
+    response = Mock(status_code=200)
+    response.json.return_value = payload
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.return_value = response
+    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
+    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
+
+    result = await subscription.xray_config('test', Request({'type': 'http'}))
+
+    assert result.status_code == 200
+    kept = base64.b64decode(result.body, validate=True).decode().splitlines()
+    assert 'vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp' in kept
+    hy2 = next(l for l in kept if l.startswith('hysteria2://'))
+    assert hy2 == 'hysteria2://secretpass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza'
 
 
 async def test_links_to_unreachable_nodes_are_dropped(monkeypatch):

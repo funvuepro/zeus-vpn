@@ -216,6 +216,14 @@ def build_xray_config(user_uuid: str, servers: list[VpnServer], title: str = "Ze
     # board rather than just where the relay is actually needed.
     for tier in _TIERS:
         tier_servers = [s for s in servers if s.tier == tier and "aeza" not in s.name.lower()]
+        if not tier_servers:
+            # Graceful degradation: if the whole non-relay side of a tier is
+            # gone (an entire provider account can go dark at once -- this is
+            # exactly how the Selectel mesh and, earlier, the whole Timeweb
+            # fleet died), fall back to Aeza rather than leaving the tier with
+            # nowhere to route. Clients connecting but nothing loading is worse
+            # than everything running through the relay node.
+            tier_servers = [s for s in servers if s.tier == tier and "aeza" in s.name.lower()]
         for i, server in enumerate(tier_servers):
             tag = f"{tier.upper()}-{i}"
             outbounds.append(_make_outbound(server, user_uuid, tag))

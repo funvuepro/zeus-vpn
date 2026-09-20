@@ -165,6 +165,21 @@ def test_aeza_is_relay_only_not_a_general_tier_candidate():
     assert any(o["tag"] == "TG-RELAY" for o in config["outbounds"])
 
 
+def test_aeza_becomes_the_lte_candidate_when_selectel_lte_is_totally_unreachable():
+    # Not a hypothetical: Selectel's whole account can go dark at once (same
+    # failure mode that originally wiped out Timeweb) while Aeza, on a
+    # different provider, stays up. If Aeza is excluded outright the moment
+    # it's the *only* LTE server left, clients connect but every tier has
+    # nowhere to route to -- worse than just using the relay node for
+    # everything. Falling back to it keeps the VPN working, even if slower.
+    servers = [_vless("lte", "zeus-lte-aeza-tcp")]
+    config = build_xray_config(USER_UUID, servers)
+
+    lte_balancer = next(b for b in config["routing"]["balancers"] if b["tag"] == "lte_balancer")
+    assert lte_balancer["selector"] == ["LTE-0"]
+    assert any(o["tag"] == "LTE-0" for o in config["outbounds"])
+
+
 def test_ipv6_is_cut_off_but_only_after_the_relay_claims_its_own():
     servers = [_vless("msk", "msk-1"), _vless("lte", "zeus-lte-aeza-tcp")]
     config = build_xray_config(USER_UUID, servers)

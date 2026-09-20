@@ -2,6 +2,7 @@ import base64 as _b64
 import html as _html
 import httpx
 import json as _json
+import re as _re
 import time as _time
 from datetime import datetime, timezone
 from urllib.parse import unquote as _urllib_unquote
@@ -572,7 +573,19 @@ def _link_node_name(link: str) -> str | None:
     return _urllib_unquote(fragment) if fragment else None
 
 
-async def _hysteria2_links(down_ips: set[str]) -> list[str]:
+def _extract_user_uuid(links: list) -> str | None:
+    # The user object from /api/sub has no vless client id (shortUuid is the
+    # subscription token itself) -- pull the real per-user uuid out of any
+    # vless:// link instead, same id Remnawave already uses to gate access.
+    for link in links:
+        if isinstance(link, str):
+            m = _re.match(r"vless://([0-9a-f-]{36})@", link)
+            if m:
+                return m.group(1)
+    return None
+
+
+async def _hysteria2_links(user_uuid: str, down_ips: set[str]) -> list[str]:
     # Hysteria2/QUIC nodes aren't Remnawave-managed Xray inbounds (a separate
     # tobyxdd/hysteria container, not xray-core), so they never show up in
     # Remnawave's own link list. They matter more now than when this was
@@ -606,7 +619,11 @@ async def _hysteria2_links(down_ips: set[str]) -> list[str]:
         # certificate check fails outright (there's no separate override in a
         # plain hysteria2:// URI the way Happ's own JSON dialect allows).
         sni = s.cert_name or s.server_name
-        links.append(f"hysteria2://{s.auth_password}@{s.ip}:{s.port}/?sni={sni}&insecure=0#{s.name}")
+        # user_uuid, not the server's static auth_password: the node's own
+        # config.yaml now validates against /hysteria-auth (see that route)
+        # instead of one shared secret, so every user gets their own
+        # credential -- same as vless already does with its per-user id.
+        links.append(f"hysteria2://{user_uuid}@{s.ip}:{s.port}/?sni={sni}&insecure=0#{s.name}")
     return links
 
 
@@ -738,7 +755,11 @@ async def xray_llp_config(token: str, request: Request):
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
 
-    links = await _hysteria2_links(down_ips)
+    user_uuid = _extract_user_uuid(data.get("links", []))
+    if not user_uuid:
+        return JSONResponse({"error": "user uuid not found"}, status_code=404)
+
+    links = await _hysteria2_links(user_uuid, down_ips)
     if not links:
         return JSONResponse({"error": "no hysteria2 links"}, status_code=503)
 
@@ -756,6 +777,39 @@ async def xray_llp_config(token: str, request: Request):
             "subscription-userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
         },
     )
+
+
+@router.post("/hysteria-auth")
+async def hysteria_auth(request: Request):
+    """External auth backend for the Hysteria2 nodes (auth.type: http).
+
+    Each node POSTs {"addr", "auth", "tx"} per connection attempt; "auth" is
+    whatever the client sent as the URI's userinfo -- the per-user
+    Remnawave uuid, per _hysteria2_links above, not a shared password. This
+    replaces the single static password every user used to share.
+    """
+    try:
+        body = await request.json()
+        auth = body.get("auth", "")
+    except Exception:
+        return JSONResponse({"ok": False})
+
+    if not _re.fullmatch(r"[0-9a-f-]{36}", auth):
+        return JSONResponse({"ok": False})
+
+    from bot.database.models import User
+    from bot.database.session import AsyncSessionLocal
+
+    try:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(User).where(User.remnawave_uuid == auth))
+            user = result.scalar_one_or_none()
+    except Exception:
+        return JSONResponse({"ok": False})
+
+    if user is None or not user.access_active:
+        return JSONResponse({"ok": False})
+    return JSONResponse({"ok": True, "id": auth})
 
 
 _STATIC_PREFIXES = ("assets/", "splash_screens/", "favicon", "manifest", "apple-touch", "pwa-")

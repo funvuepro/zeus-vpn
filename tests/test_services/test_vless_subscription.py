@@ -1,10 +1,11 @@
 import base64
+import json as _json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 from starlette.requests import Request
 
-from bot.database.models import VpnServer
+from bot.database.models import User, VpnServer
 from bot.webhooks import subscription
 
 
@@ -60,77 +61,6 @@ async def test_grpc_links_are_dropped(monkeypatch):
     assert kept == ['vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp']
 
 
-@pytest.mark.skip(reason="hysteria2 append disabled live 2026-09-20 -- unconfirmed whether Happ's link-list parser tolerates an unknown scheme or aborts the whole parse on it")
-async def test_hysteria2_servers_are_appended_to_the_subscription(monkeypatch, db_session):
-    # Hysteria2/QUIC nodes are a separate hysteria container, not a
-    # Remnawave-managed Xray inbound, so Remnawave's own link list never
-    # includes them -- they have to be appended from our own DB. This matters
-    # more now that Russian DPI (TSPU) fingerprints VLESS+TCP+Reality traffic
-    # behaviorally: QUIC doesn't match that pattern at all.
-    db_session.add(VpnServer(
-        name="zeus-llp-aeza", ip="109.120.132.0", port=8444, protocol="hysteria2",
-        transport="tcp", fingerprint="edge", server_name="yastatic.net",
-        cert_name="llp.krzmihome.ru", auth_password="secretpass", is_active=True,
-    ))
-    await db_session.commit()
-
-    payload = {
-        'isFound': True,
-        'links': ['vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp'],
-    }
-    response = Mock(status_code=200)
-    response.json.return_value = payload
-    client = AsyncMock()
-    client.__aenter__.return_value = client
-    client.get.return_value = response
-    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
-    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
-
-    result = await subscription.xray_config('test', Request({'type': 'http'}))
-
-    assert result.status_code == 200
-    kept = base64.b64decode(result.body, validate=True).decode().splitlines()
-    assert 'vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp' in kept
-    hy2 = next(l for l in kept if l.startswith('hysteria2://'))
-    assert hy2 == 'hysteria2://secretpass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza'
-
-
-@pytest.mark.skip(reason="hysteria2 append disabled live 2026-09-20 -- unconfirmed whether Happ's link-list parser tolerates an unknown scheme or aborts the whole parse on it")
-async def test_hysteria2_link_dropped_when_its_ip_shares_a_dead_node(monkeypatch, db_session):
-    # Most hysteria2 boxes are the same physical Selectel VM as an MSK/LTE
-    # node, just a different port -- Remnawave's node-connectivity check has
-    # no idea hysteria2 is even running there, so it has to be matched by IP.
-    db_session.add(VpnServer(
-        name="zeus-llp-1", ip="89.223.30.168", port=8444, protocol="hysteria2",
-        transport="tcp", fingerprint="edge", server_name="yastatic.net",
-        cert_name="llp.krzmihome.ru", auth_password="deadpass", is_active=True,
-    ))
-    db_session.add(VpnServer(
-        name="zeus-llp-aeza", ip="109.120.132.0", port=8444, protocol="hysteria2",
-        transport="tcp", fingerprint="edge", server_name="yastatic.net",
-        cert_name="llp.krzmihome.ru", auth_password="alivepass", is_active=True,
-    ))
-    await db_session.commit()
-
-    sub_payload = {'isFound': True, 'links': ['vless://a@1.1.1.1:443?x=1#zeus-lte-aeza-tcp']}
-    nodes_payload = {'response': [{'name': 'zeus-lte-1', 'isConnected': False, 'address': '89.223.30.168'}]}
-    sub_response = Mock(status_code=200)
-    sub_response.json.return_value = sub_payload
-    nodes_response = Mock(status_code=200)
-    nodes_response.json.return_value = nodes_payload
-    client = AsyncMock()
-    client.__aenter__.return_value = client
-    client.get.side_effect = [sub_response, nodes_response]
-    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
-    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
-
-    result = await subscription.xray_config('test', Request({'type': 'http'}))
-
-    kept = base64.b64decode(result.body, validate=True).decode().splitlines()
-    hy2_links = [l for l in kept if l.startswith('hysteria2://')]
-    assert hy2_links == ['hysteria2://alivepass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza']
-
-
 async def test_llp_subscription_serves_only_hysteria2_links(monkeypatch, db_session):
     # Confirmed live 2026-09-20: QUIC/hysteria2 is the one transport that
     # actually gets through TSPU's behavioral fingerprinting of
@@ -140,11 +70,14 @@ async def test_llp_subscription_serves_only_hysteria2_links(monkeypatch, db_sess
     db_session.add(VpnServer(
         name="zeus-llp-aeza", ip="109.120.132.0", port=8444, protocol="hysteria2",
         transport="tcp", fingerprint="edge", server_name="yastatic.net",
-        cert_name="llp.krzmihome.ru", auth_password="secretpass", is_active=True,
+        cert_name="llp.krzmihome.ru", auth_password="unused-now", is_active=True,
     ))
     await db_session.commit()
 
-    payload = {'isFound': True, 'links': ['vless://a@1.1.1.1:443?x=1#zeus-lte-aeza-tcp']}
+    payload = {
+        'isFound': True,
+        'links': ['vless://11111111-1111-1111-1111-111111111111@1.1.1.1:443?x=1#zeus-lte-aeza-tcp'],
+    }
     response = Mock(status_code=200)
     response.json.return_value = payload
     client = AsyncMock()
@@ -157,10 +90,20 @@ async def test_llp_subscription_serves_only_hysteria2_links(monkeypatch, db_sess
 
     assert result.status_code == 200
     kept = base64.b64decode(result.body, validate=True).decode().splitlines()
-    assert kept == ['hysteria2://secretpass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza']
+    # The per-user Remnawave uuid is the credential now, not the node's own
+    # static auth_password -- every user gets their own, checked against
+    # /hysteria-auth, instead of one secret shared by everyone.
+    assert kept == ['hysteria2://11111111-1111-1111-1111-111111111111@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza']
 
 
-async def test_llp_subscription_503s_when_no_hysteria2_servers(monkeypatch):
+async def test_llp_subscription_404s_without_a_vless_link_to_pull_the_uuid_from(monkeypatch, db_session):
+    db_session.add(VpnServer(
+        name="zeus-llp-aeza", ip="109.120.132.0", port=8444, protocol="hysteria2",
+        transport="tcp", fingerprint="edge", server_name="yastatic.net",
+        cert_name="llp.krzmihome.ru", auth_password="unused-now", is_active=True,
+    ))
+    await db_session.commit()
+
     payload = {'isFound': True, 'links': []}
     response = Mock(status_code=200)
     response.json.return_value = payload
@@ -172,7 +115,69 @@ async def test_llp_subscription_503s_when_no_hysteria2_servers(monkeypatch):
 
     result = await subscription.xray_llp_config('test', Request({'type': 'http'}))
 
+    assert result.status_code == 404
+
+
+async def test_llp_subscription_503s_when_no_hysteria2_servers(monkeypatch, db_session):
+    payload = {
+        'isFound': True,
+        'links': ['vless://11111111-1111-1111-1111-111111111111@1.1.1.1:443?x=1#zeus-lte-aeza-tcp'],
+    }
+    response = Mock(status_code=200)
+    response.json.return_value = payload
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.return_value = response
+    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
+    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
+
+    result = await subscription.xray_llp_config('test', Request({'type': 'http'}))
+
     assert result.status_code == 503
+
+
+async def test_hysteria_auth_accepts_active_user_by_remnawave_uuid(db_session):
+    db_session.add(User(
+        telegram_id=1, remnawave_uuid="22222222-2222-2222-2222-222222222222",
+        access_active=True,
+    ))
+    await db_session.commit()
+
+    req = Mock()
+    req.json = AsyncMock(return_value={
+        "addr": "1.2.3.4:5555", "auth": "22222222-2222-2222-2222-222222222222", "tx": 0,
+    })
+
+    result = await subscription.hysteria_auth(req)
+
+    assert result.status_code == 200
+    assert _json.loads(result.body) == {"ok": True, "id": "22222222-2222-2222-2222-222222222222"}
+
+
+async def test_hysteria_auth_rejects_inactive_user(db_session):
+    db_session.add(User(
+        telegram_id=2, remnawave_uuid="33333333-3333-3333-3333-333333333333",
+        access_active=False,
+    ))
+    await db_session.commit()
+
+    req = Mock()
+    req.json = AsyncMock(return_value={
+        "addr": "1.2.3.4:5555", "auth": "33333333-3333-3333-3333-333333333333", "tx": 0,
+    })
+
+    result = await subscription.hysteria_auth(req)
+
+    assert _json.loads(result.body) == {"ok": False}
+
+
+async def test_hysteria_auth_rejects_unknown_or_malformed_auth(db_session):
+    req = Mock()
+    req.json = AsyncMock(return_value={"addr": "1.2.3.4:5555", "auth": "not-a-uuid", "tx": 0})
+
+    result = await subscription.hysteria_auth(req)
+
+    assert _json.loads(result.body) == {"ok": False}
 
 
 async def test_links_to_unreachable_nodes_are_dropped(monkeypatch):

@@ -94,6 +94,41 @@ async def test_hysteria2_servers_are_appended_to_the_subscription(monkeypatch, d
     assert hy2 == 'hysteria2://secretpass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza'
 
 
+async def test_hysteria2_link_dropped_when_its_ip_shares_a_dead_node(monkeypatch, db_session):
+    # Most hysteria2 boxes are the same physical Selectel VM as an MSK/LTE
+    # node, just a different port -- Remnawave's node-connectivity check has
+    # no idea hysteria2 is even running there, so it has to be matched by IP.
+    db_session.add(VpnServer(
+        name="zeus-llp-1", ip="89.223.30.168", port=8444, protocol="hysteria2",
+        transport="tcp", fingerprint="edge", server_name="yastatic.net",
+        cert_name="llp.krzmihome.ru", auth_password="deadpass", is_active=True,
+    ))
+    db_session.add(VpnServer(
+        name="zeus-llp-aeza", ip="109.120.132.0", port=8444, protocol="hysteria2",
+        transport="tcp", fingerprint="edge", server_name="yastatic.net",
+        cert_name="llp.krzmihome.ru", auth_password="alivepass", is_active=True,
+    ))
+    await db_session.commit()
+
+    sub_payload = {'isFound': True, 'links': ['vless://a@1.1.1.1:443?x=1#zeus-lte-aeza-tcp']}
+    nodes_payload = {'response': [{'name': 'zeus-lte-1', 'isConnected': False, 'address': '89.223.30.168'}]}
+    sub_response = Mock(status_code=200)
+    sub_response.json.return_value = sub_payload
+    nodes_response = Mock(status_code=200)
+    nodes_response.json.return_value = nodes_payload
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.side_effect = [sub_response, nodes_response]
+    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
+    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
+
+    result = await subscription.xray_config('test', Request({'type': 'http'}))
+
+    kept = base64.b64decode(result.body, validate=True).decode().splitlines()
+    hy2_links = [l for l in kept if l.startswith('hysteria2://')]
+    assert hy2_links == ['hysteria2://alivepass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza']
+
+
 async def test_links_to_unreachable_nodes_are_dropped(monkeypatch):
     # Not hypothetical: an entire provider account can go dark at once (this
     # is exactly what happened to Selectel on 2026-09-20 -- 11 of 12 nodes

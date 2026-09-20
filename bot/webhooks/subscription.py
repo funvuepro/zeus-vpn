@@ -572,7 +572,7 @@ def _link_node_name(link: str) -> str | None:
     return _urllib_unquote(fragment) if fragment else None
 
 
-async def _hysteria2_links() -> list[str]:
+async def _hysteria2_links(down_ips: set[str]) -> list[str]:
     # Hysteria2/QUIC nodes aren't Remnawave-managed Xray inbounds (a separate
     # tobyxdd/hysteria container, not xray-core), so they never show up in
     # Remnawave's own link list. They matter more now than when this was
@@ -595,6 +595,12 @@ async def _hysteria2_links() -> list[str]:
 
     links = []
     for s in servers:
+        # These aren't Remnawave nodes, so the node-name-based down filter
+        # above can't see them -- but most share a physical box with a
+        # Selectel MSK/LTE node (same IP, different port), which *is*
+        # tracked. Match on that IP instead of trusting is_active alone.
+        if s.ip in down_ips:
+            continue
         # The real cert is issued for cert_name, not the decoy in server_name --
         # sni must match what the server actually presents or the client's
         # certificate check fails outright (there's no separate override in a
@@ -604,7 +610,7 @@ async def _hysteria2_links() -> list[str]:
     return links
 
 
-async def _unreachable_node_names(client: httpx.AsyncClient) -> set[str]:
+async def _unreachable_nodes(client: httpx.AsyncClient) -> tuple[set[str], set[str]]:
     # Best-effort: an entire provider's worth of nodes can drop off the
     # network at once (Selectel's whole account went dark on 2026-09-20,
     # same failure mode Timeweb had). Individual VLESS links carry no health
@@ -618,9 +624,13 @@ async def _unreachable_node_names(client: httpx.AsyncClient) -> set[str]:
         )
         nodes = resp.json()
         nodes = nodes.get("response", nodes)
-        return {n["name"] for n in nodes if not n.get("isConnected")}
+        down = [n for n in nodes if not n.get("isConnected")]
+        return (
+            {n["name"] for n in down},
+            {n["address"] for n in down if n.get("address")},
+        )
     except Exception:
-        return set()
+        return set(), set()
 
 
 @router.get("/xray/{token}")
@@ -646,7 +656,7 @@ async def xray_config(token: str, request: Request):
         except Exception:
             return JSONResponse({"error": "invalid response"}, status_code=500)
 
-        down_nodes = await _unreachable_node_names(client)
+        down_nodes, down_ips = await _unreachable_nodes(client)
 
     username = data.get("user", {}).get("username", "user")
     days_left = data.get("user", {}).get("daysLeft", 0)
@@ -664,12 +674,15 @@ async def xray_config(token: str, request: Request):
     # live on 2026-09-20: packet capture on the relay node showed every grpc
     # connection attempt from the actual phone client falling through to
     # Reality's decoy-proxy fallback -- byte-for-byte mirrored to the decoy
-    # site instead of tunneling -- while the identical link tested fine from a
-    # plain xray-core client. Likely a uTLS fingerprint mismatch specific to
-    # Happ's bundled client build. Drop grpc links until that's understood;
-    # tcp is unaffected and confirmed working end-to-end.
+    # site instead of tunneling). Root cause turned out to be TSPU's
+    # mid-2026 move to behavioral fingerprinting of VLESS+TCP+Reality traffic
+    # (packet sizes/timing of the default flow) -- it catches gRPC-over-TCP
+    # the same as raw TCP, so dropping grpc here doesn't fix connectivity by
+    # itself, just avoids wasting a connection attempt on a leg that's
+    # equally dead. hysteria2 (QUIC, appended below) is the one transport
+    # that doesn't match that signature.
     links = [link for link in links if "type=grpc" not in link]
-    links += await _hysteria2_links()
+    links += await _hysteria2_links(down_ips)
     if not links:
         return JSONResponse({"error": "no vless links"}, status_code=503)
     body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")

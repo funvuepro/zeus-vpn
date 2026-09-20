@@ -704,6 +704,60 @@ async def xray_config(token: str, request: Request):
     )
 
 
+@router.get("/xray-llp/{token}")
+async def xray_llp_config(token: str, request: Request):
+    """Hysteria2-only subscription, served separately from /xray/{token}.
+
+    Confirmed live 2026-09-20: appending a hysteria2:// line to the vless
+    link list made the whole server list go empty in Happ -- unconfirmed
+    whether that's an unknown-scheme abort or something else, but a broken
+    vless list is worse than an extra subscription to add. A dedicated
+    endpoint sidesteps the question entirely. Also confirmed live the same
+    day: QUIC gets through where TCP+Reality (both raw and gRPC) gets
+    caught by TSPU's behavioral fingerprinting -- this is the transport
+    that actually works right now.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{_remnawave_base()}/api/sub/{token}",
+            headers={"Accept": "text/html"},
+        )
+
+        if resp.status_code != 200:
+            return JSONResponse({"error": "subscription not found"}, status_code=404)
+
+        try:
+            data = resp.json()
+            if not data.get("isFound"):
+                return JSONResponse({"error": "subscription not found"}, status_code=404)
+        except Exception:
+            return JSONResponse({"error": "invalid response"}, status_code=500)
+
+        _, down_ips = await _unreachable_nodes(client)
+
+    username = data.get("user", {}).get("username", "user")
+    days_left = data.get("user", {}).get("daysLeft", 0)
+
+    links = await _hysteria2_links(down_ips)
+    if not links:
+        return JSONResponse({"error": "no hysteria2 links"}, status_code=503)
+
+    title = _b64.b64encode(f"Zeus VPN LLP | {username}".encode("utf-8")).decode("ascii")
+    expire_ts = int(_time.time()) + days_left * 86400
+    body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
+
+    return Response(
+        content=body,
+        media_type="text/plain",
+        headers={
+            "profile-title": f"base64:{title}",
+            "profile-update-interval": "12",
+            "profile-web-page-url": f"{_remnawave_base()}/api/sub/{token}",
+            "subscription-userinfo": f"upload=0; download=0; total=0; expire={expire_ts}",
+        },
+    )
+
+
 _STATIC_PREFIXES = ("assets/", "splash_screens/", "favicon", "manifest", "apple-touch", "pwa-")
 
 

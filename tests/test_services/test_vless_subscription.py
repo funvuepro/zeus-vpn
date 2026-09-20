@@ -131,6 +131,50 @@ async def test_hysteria2_link_dropped_when_its_ip_shares_a_dead_node(monkeypatch
     assert hy2_links == ['hysteria2://alivepass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza']
 
 
+async def test_llp_subscription_serves_only_hysteria2_links(monkeypatch, db_session):
+    # Confirmed live 2026-09-20: QUIC/hysteria2 is the one transport that
+    # actually gets through TSPU's behavioral fingerprinting of
+    # VLESS+TCP+Reality (raw and gRPC alike). Mixing a hysteria2:// line into
+    # the vless link list broke the whole list in Happ, so it's served as
+    # its own separate subscription instead.
+    db_session.add(VpnServer(
+        name="zeus-llp-aeza", ip="109.120.132.0", port=8444, protocol="hysteria2",
+        transport="tcp", fingerprint="edge", server_name="yastatic.net",
+        cert_name="llp.krzmihome.ru", auth_password="secretpass", is_active=True,
+    ))
+    await db_session.commit()
+
+    payload = {'isFound': True, 'links': ['vless://a@1.1.1.1:443?x=1#zeus-lte-aeza-tcp']}
+    response = Mock(status_code=200)
+    response.json.return_value = payload
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.return_value = response
+    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
+    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
+
+    result = await subscription.xray_llp_config('test', Request({'type': 'http'}))
+
+    assert result.status_code == 200
+    kept = base64.b64decode(result.body, validate=True).decode().splitlines()
+    assert kept == ['hysteria2://secretpass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza']
+
+
+async def test_llp_subscription_503s_when_no_hysteria2_servers(monkeypatch):
+    payload = {'isFound': True, 'links': []}
+    response = Mock(status_code=200)
+    response.json.return_value = payload
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.get.return_value = response
+    monkeypatch.setattr(subscription.httpx, 'AsyncClient', lambda: client)
+    monkeypatch.setattr(subscription, '_remnawave_base', lambda: 'https://example.test')
+
+    result = await subscription.xray_llp_config('test', Request({'type': 'http'}))
+
+    assert result.status_code == 503
+
+
 async def test_links_to_unreachable_nodes_are_dropped(monkeypatch):
     # Not hypothetical: an entire provider account can go dark at once (this
     # is exactly what happened to Selectel on 2026-09-20 -- 11 of 12 nodes

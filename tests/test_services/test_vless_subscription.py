@@ -60,6 +60,7 @@ async def test_grpc_links_are_dropped(monkeypatch):
     assert kept == ['vless://a@1.1.1.1:443?type=tcp&flow=xtls-rprx-vision#zeus-lte-aeza-tcp']
 
 
+@pytest.mark.skip(reason="hysteria2 append disabled live 2026-09-20 -- unconfirmed whether Happ's link-list parser tolerates an unknown scheme or aborts the whole parse on it")
 async def test_hysteria2_servers_are_appended_to_the_subscription(monkeypatch, db_session):
     # Hysteria2/QUIC nodes are a separate hysteria container, not a
     # Remnawave-managed Xray inbound, so Remnawave's own link list never
@@ -94,6 +95,7 @@ async def test_hysteria2_servers_are_appended_to_the_subscription(monkeypatch, d
     assert hy2 == 'hysteria2://secretpass@109.120.132.0:8444/?sni=llp.krzmihome.ru&insecure=0#zeus-llp-aeza'
 
 
+@pytest.mark.skip(reason="hysteria2 append disabled live 2026-09-20 -- unconfirmed whether Happ's link-list parser tolerates an unknown scheme or aborts the whole parse on it")
 async def test_hysteria2_link_dropped_when_its_ip_shares_a_dead_node(monkeypatch, db_session):
     # Most hysteria2 boxes are the same physical Selectel VM as an MSK/LTE
     # node, just a different port -- Remnawave's node-connectivity check has

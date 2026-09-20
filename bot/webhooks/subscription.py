@@ -682,7 +682,12 @@ async def xray_config(token: str, request: Request):
     # equally dead. hysteria2 (QUIC, appended below) is the one transport
     # that doesn't match that signature.
     links = [link for link in links if "type=grpc" not in link]
-    links += await _hysteria2_links(down_ips)
+    # TEMP: pulled out live 2026-09-20 -- the client's server list went
+    # empty right after this line started appending a hysteria2:// URI, and
+    # it's unconfirmed whether Happ's link-list parser tolerates an unknown
+    # scheme (skip that line) or aborts the whole parse on it. Re-enable
+    # once that's verified; a broken link list is worse than no hysteria2.
+    # links += await _hysteria2_links(down_ips)
     if not links:
         return JSONResponse({"error": "no vless links"}, status_code=503)
     body = _b64.b64encode("\n".join(links).encode("utf-8")).decode("ascii")
